@@ -29,6 +29,7 @@
       STB.store.loaded = true;
       STB.renderRoute();
     } catch (e) {
+      console.error('refresh failed', e);
       STB.toast('Could not refresh data — check connection');
     }
   };

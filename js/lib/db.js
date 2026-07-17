@@ -55,12 +55,12 @@
     },
     async applyImport({ matches, unmatchedTxns }) {
       for (const m of matches) {
-        await this.markPaid(m.bill_id, {
-          payment_ref: m.txn.ref, payment_date: m.txn.txn_date
-        });
         const { error } = await client.from('bank_txns')
           .insert({ ...m.txn, matched_bill_id: m.bill_id });
         if (error) throw error;
+        await this.markPaid(m.bill_id, {
+          payment_ref: m.txn.ref, payment_date: m.txn.txn_date
+        });
       }
       if (unmatchedTxns.length) {
         const { error } = await client.from('bank_txns')
