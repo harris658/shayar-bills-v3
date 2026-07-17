@@ -134,22 +134,21 @@
             party_id: p.id, type, amount: amt,
             bill_date: date.value || U$.todayStr(), note: note.value.trim()
           });
+          STB.toast('Bill saved ✓');
+          if (addAnother) {
+            party.value = ''; amount.value = ''; note.value = '';
+            preview.innerHTML = '&nbsp;';
+            STB.refresh();           // background; form keeps focus
+            party.focus();
+          } else {
+            await STB.refresh();
+            STB.nav('#/bills');
+          }
         } catch (e) {
           console.error('save failed', e);
           STB.toast('Could not save — check connection');
-          return;
         } finally {
           saving = false;
-        }
-        STB.toast('Bill saved ✓');
-        if (addAnother) {
-          party.value = ''; amount.value = ''; note.value = '';
-          preview.innerHTML = '&nbsp;';
-          STB.refresh();           // background; form keeps focus
-          party.focus();
-        } else {
-          await STB.refresh();
-          STB.nav('#/bills');
         }
       }
       $('#save-btn').addEventListener('click', () => save(false));
