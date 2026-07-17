@@ -22,15 +22,19 @@
   STB.partyById = (id) => STB.store.parties.find((p) => p.id === id);
 
   STB.refresh = async function () {
-    const [parties, bills] = await Promise.all([STB.db.listParties(), STB.db.listBills()]);
-    STB.store.parties = parties;
-    STB.store.bills = bills;
-    STB.store.loaded = true;
-    STB.renderRoute();
+    try {
+      const [parties, bills] = await Promise.all([STB.db.listParties(), STB.db.listBills()]);
+      STB.store.parties = parties;
+      STB.store.bills = bills;
+      STB.store.loaded = true;
+      STB.renderRoute();
+    } catch (e) {
+      STB.toast('Could not refresh data — check connection');
+    }
   };
 
   window.addEventListener('focus', () => {
-    if (STB.store.loaded) STB.refresh();
+    if (!topbar.hidden) STB.refresh();
   });
 
   STB.nav = function (hash) { location.hash = hash; };
