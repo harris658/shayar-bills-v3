@@ -64,14 +64,25 @@
         drop.innerHTML = items.join('');
         drop.hidden = items.length === 0;
       }
+      let picking = false;
       async function pick(i) {
+        if (picking) return;
         const m = matches();
         if (i < m.length) { party.value = m[i].name; }
         else {
-          const p = await STB.db.createParty(party.value.trim());
-          STB.store.parties.push(p);
-          STB.store.parties.sort((a, b) => a.name.localeCompare(b.name));
-          STB.toast('Party created ✓');
+          picking = true;
+          try {
+            const p = await STB.db.createParty(party.value.trim());
+            STB.store.parties.push(p);
+            STB.store.parties.sort((a, b) => a.name.localeCompare(b.name));
+            STB.toast('Party created ✓');
+          } catch (e) {
+            console.error('createParty failed', e);
+            STB.toast('Could not create party — check connection');
+            return;
+          } finally {
+            picking = false;
+          }
         }
         drop.hidden = true;
         amount.focus();
@@ -81,7 +92,7 @@
         const total = matches().length + (party.value.trim() && !exact() ? 1 : 0);
         if (e.key === 'ArrowDown') { hi = Math.min(hi + 1, total - 1); renderDrop(); e.preventDefault(); }
         else if (e.key === 'ArrowUp') { hi = Math.max(hi - 1, 0); renderDrop(); e.preventDefault(); }
-        else if (e.key === 'Enter') {
+        else if (e.key === 'Enter' && !e.ctrlKey && !e.metaKey) {
           e.preventDefault();
           if (exact()) { drop.hidden = true; amount.focus(); }
           else if (total > 0) pick(hi);
@@ -104,21 +115,32 @@
         if (e.key === 'Enter' && !e.ctrlKey && !e.metaKey) { e.preventDefault(); note.focus(); }
       });
 
+      let saving = false;
       async function save(addAnother) {
+        if (saving) return;
         const name = party.value.trim();
         const v = U$.safeEval(amount.value.trim());
         const amt = Number.isNaN(v) ? 0 : Math.round(v * 100) / 100;
         if (!name) { STB.toast('Party is required'); party.focus(); return; }
         if (!(amt > 0)) { STB.toast('Amount must be more than 0'); amount.focus(); return; }
-        let p = exact();
-        if (!p) {
-          p = await STB.db.createParty(name);
-          STB.store.parties.push(p);
+        saving = true;
+        try {
+          let p = exact();
+          if (!p) {
+            p = await STB.db.createParty(name);
+            STB.store.parties.push(p);
+          }
+          await STB.db.createBill({
+            party_id: p.id, type, amount: amt,
+            bill_date: date.value || U$.todayStr(), note: note.value.trim()
+          });
+        } catch (e) {
+          console.error('save failed', e);
+          STB.toast('Could not save — check connection');
+          return;
+        } finally {
+          saving = false;
         }
-        await STB.db.createBill({
-          party_id: p.id, type, amount: amt,
-          bill_date: date.value || U$.todayStr(), note: note.value.trim()
-        });
         STB.toast('Bill saved ✓');
         if (addAnother) {
           party.value = ''; amount.value = ''; note.value = '';
