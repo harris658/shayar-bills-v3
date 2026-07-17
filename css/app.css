@@ -49,3 +49,12 @@ table.tbl { width: 100%; border-collapse: collapse; }
   .topbar { padding: 8px 12px; gap: 10px; }
   #screen-root { padding: 14px 10px 60px; }
 }
+.type-row { display: flex; gap: 8px; }
+.type-btn { flex: 1; padding: 10px; border: 1px solid var(--line); background: var(--surface);
+  border-radius: 8px; font-weight: 700; cursor: pointer; color: var(--ink-soft); }
+.type-btn.active { border-color: var(--brand); color: var(--brand); background: #eef3fe; }
+.drop { position: relative; border: 1px solid var(--line); border-radius: 8px;
+  background: var(--surface); box-shadow: var(--shadow); margin-top: 2px; overflow: hidden; }
+.drop-item { padding: 9px 12px; cursor: pointer; }
+.drop-item.hi, .drop-item:hover { background: #eef3fe; }
+.drop-item.create { color: var(--brand); font-weight: 700; }

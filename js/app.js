@@ -47,6 +47,9 @@
   }
 
   function renderRoute() {
+    // Typing in the entry form? A background refresh must not rebuild it.
+    if (route().name === 'new' && root.contains(document.activeElement)
+        && document.activeElement.tagName === 'INPUT') return;
     const r = route();
     const screen = STB.screens[r.name] || STB.screens.dashboard;
     document.querySelectorAll('#main-nav a').forEach((a) => {
