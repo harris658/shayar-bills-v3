@@ -58,3 +58,5 @@ table.tbl { width: 100%; border-collapse: collapse; }
 .drop-item { padding: 9px 12px; cursor: pointer; }
 .drop-item.hi, .drop-item:hover { background: #eef3fe; }
 .drop-item.create { color: var(--brand); font-weight: 700; }
+.filters { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; }
+.filters input, .filters select { width: auto; }
