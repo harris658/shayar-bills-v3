@@ -66,11 +66,13 @@
             <input id="f-to" type="date" value="${ui.to}">
             <button class="btn secondary" id="print-sel">Print vouchers</button>
           </div>
-          <table class="tbl">
-            <thead><tr><th></th><th>Date</th><th>Party</th><th>Note</th>
-              <th class="num">Amount</th><th>Status</th><th></th></tr></thead>
-            <tbody>${rows || '<tr><td colspan="7" class="hint">No bills match.</td></tr>'}</tbody>
-          </table>
+          <div class="tbl-wrap">
+            <table class="tbl">
+              <thead><tr><th></th><th>Date</th><th>Party</th><th>Note</th>
+                <th class="num">Amount</th><th>Status</th><th></th></tr></thead>
+              <tbody>${rows || '<tr><td colspan="7" class="hint">No bills match.</td></tr>'}</tbody>
+            </table>
+          </div>
         </div>`;
 
       const rerender = () => this.render(root);
@@ -85,8 +87,10 @@
       });
 
       root.querySelectorAll('.mark-paid').forEach((btn) => btn.addEventListener('click', async () => {
+        if (btn.disabled) return;
         const ref = prompt('Bank ref number (leave empty for cash/none):');
         if (ref === null) return;
+        btn.disabled = true;
         try {
           await STB.db.markPaid(btn.dataset.id, {
             payment_ref: ref.trim(), payment_date: STB.util.todayStr()
@@ -96,13 +100,18 @@
         } catch (e) {
           console.error('markPaid failed', e);
           STB.toast('Could not mark paid — check connection');
+        } finally {
+          btn.disabled = false;
         }
       }));
 
       root.querySelectorAll('.del').forEach((btn) => btn.addEventListener('click', async () => {
+        if (btn.disabled) return;
         const b = STB.store.bills.find((x) => x.id === btn.dataset.id);
-        const p = b && STB.partyById(b.party_id);
+        if (!b) { STB.toast('Bill no longer exists'); return; }
+        const p = STB.partyById(b.party_id);
         if (!confirm(`Delete bill — ${p ? p.name : '?'}, ${STB.util.money(b.amount)}?`)) return;
+        btn.disabled = true;
         try {
           await STB.db.deleteBill(btn.dataset.id);
           STB.toast('Bill deleted');
@@ -110,6 +119,8 @@
         } catch (e) {
           console.error('deleteBill failed', e);
           STB.toast('Could not delete — check connection');
+        } finally {
+          btn.disabled = false;
         }
       }));
 

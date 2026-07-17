@@ -36,6 +36,7 @@ label input, label select { margin-top: 4px; }
 .toast { position: fixed; left: 50%; bottom: 28px; transform: translateX(-50%);
   background: var(--ink); color: #fff; padding: 10px 18px; border-radius: 99px;
   font-weight: 600; z-index: 100; }
+.tbl-wrap { overflow-x: auto; }
 table.tbl { width: 100%; border-collapse: collapse; }
 .tbl th, .tbl td { text-align: left; padding: 9px 10px;
   border-bottom: 1px solid var(--line); }
