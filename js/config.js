@@ -1,0 +1,5 @@
+globalThis.STB = globalThis.STB || {};
+STB.config = {
+  SUPABASE_URL: 'https://YOUR-PROJECT.supabase.co',
+  SUPABASE_ANON_KEY: 'YOUR-ANON-KEY'
+};
