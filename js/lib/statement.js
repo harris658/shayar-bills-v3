@@ -26,17 +26,28 @@
 
   const MON = { jan: '01', feb: '02', mar: '03', apr: '04', may: '05', jun: '06',
     jul: '07', aug: '08', sep: '09', oct: '10', nov: '11', dec: '12' };
+  function isValidYMD(year, month, day) {
+    const d = new Date(year, month - 1, day);
+    return d.getFullYear() === year && d.getMonth() + 1 === month && d.getDate() === day;
+  }
+
   function parseDate(s) {
     s = String(s || '').trim();
     let m;
-    if ((m = s.match(/^(\d{4})-(\d{2})-(\d{2})$/))) return s;
+    if ((m = s.match(/^(\d{4})-(\d{2})-(\d{2})$/)))
+      return isValidYMD(Number(m[1]), Number(m[2]), Number(m[3])) ? s : null;
     if ((m = s.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/)))
-      return `${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`;
+      return isValidYMD(Number(m[3]), Number(m[2]), Number(m[1]))
+        ? `${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`
+        : null;
     if ((m = s.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{2})$/)))
-      return `20${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`;
+      return isValidYMD(2000 + Number(m[3]), Number(m[2]), Number(m[1]))
+        ? `20${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`
+        : null;
     if ((m = s.match(/^(\d{1,2})\s+([A-Za-z]{3})\w*\s+(\d{4})$/))) {
       const mo = MON[m[2].toLowerCase()];
-      if (mo) return `${m[3]}-${mo}-${m[1].padStart(2, '0')}`;
+      if (mo && isValidYMD(Number(m[3]), Number(mo), Number(m[1])))
+        return `${m[3]}-${mo}-${m[1].padStart(2, '0')}`;
     }
     return null;
   }

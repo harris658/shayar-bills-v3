@@ -18,6 +18,15 @@ test('parseDate formats', () => {
   assert.equal(S.parseDate('junk'), null);
 });
 
+test('parseDate rejects calendar-invalid dates', () => {
+  assert.equal(S.parseDate('31/02/2026'), null);       // Feb has no 31st
+  assert.equal(S.parseDate('13/13/2026'), null);        // month 13 invalid
+  assert.equal(S.parseDate('2026-02-31'), null);        // ISO passthrough, still invalid
+  assert.equal(S.parseDate('29/02/2024'), '2024-02-29'); // leap year, valid
+  assert.equal(S.parseDate('29/02/2026'), null);         // non-leap year, invalid
+  assert.equal(S.parseDate('05/07/2026'), '2026-07-05'); // existing-format sanity check
+});
+
 test('parseAmount', () => {
   assert.equal(S.parseAmount('₹1,200.50'), 1200.5);
   assert.equal(S.parseAmount(' 12,500 '), 12500);
