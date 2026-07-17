@@ -3,10 +3,6 @@
   globalThis.STB = globalThis.STB || {};
   STB.screens = STB.screens || {};
 
-  STB.screens.dashboard = STB.screens.dashboard || {
-    render(root) { root.innerHTML = '<div class="card">Signed in ✓ — dashboard comes in Task 6.</div>'; }
-  };
-
   const root = document.getElementById('screen-root');
   const topbar = document.getElementById('topbar');
 
