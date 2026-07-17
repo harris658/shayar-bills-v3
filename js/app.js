@@ -42,17 +42,26 @@
     return { name: parts[0] || 'dashboard', param: parts[1] || null };
   }
 
+  let renderedRoute = null; // route name currently reflected in #screen-root
+
   function renderRoute() {
-    // Typing in the entry form? A background refresh must not rebuild it.
-    if (route().name === 'new' && root.contains(document.activeElement)
-        && document.activeElement.tagName === 'INPUT') return;
     const r = route();
+    // Typing in the entry form? A background refresh must not rebuild it.
+    if (r.name === 'new' && root.contains(document.activeElement)
+        && document.activeElement.tagName === 'INPUT') return;
+    // Import mid-flow (mapping/review)? A same-route background refresh must
+    // not discard tick/dropdown state — but genuine navigation TO import
+    // (hash just changed from something else) must still render normally.
+    if (r.name === 'import' && renderedRoute === 'import'
+        && STB.screens.import && STB.screens.import.inProgress
+        && STB.screens.import.inProgress()) return;
     const screen = STB.screens[r.name] || STB.screens.dashboard;
     document.querySelectorAll('#main-nav a').forEach((a) => {
       a.classList.toggle('active', a.dataset.nav === r.name);
     });
     root.innerHTML = '';
     screen.render(root, r.param);
+    renderedRoute = r.name;
   }
   STB.renderRoute = renderRoute;
 

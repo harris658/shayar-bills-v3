@@ -7,6 +7,9 @@
   const st = { step: 'pick', rows: [], mapping: null, proposal: null, fileName: '' };
 
   STB.screens.import = {
+    // Mid-flow = mapping or review step, where tick/dropdown state would be
+    // silently lost if a background refresh rebuilt the DOM from scratch.
+    inProgress() { return st.step !== 'pick'; },
     render(root) {
       const U = STB.util;
 
