@@ -21,6 +21,14 @@ test('safeEval', () => {
   assert.ok(Number.isNaN(U.safeEval('')));
 });
 
+test('todayStr is the local calendar date', () => {
+  assert.equal(U.todayStr(), new Date().toLocaleDateString('en-CA'));
+});
+
+test('paise that round to 100 carry into rupees', () => {
+  assert.equal(U.amountInWords(4.999), 'Five');
+});
+
 test('amountInWords Indian grouping', () => {
   assert.equal(U.amountInWords(0), 'Zero');
   assert.equal(U.amountInWords(5), 'Five');

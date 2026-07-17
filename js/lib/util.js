@@ -2,7 +2,11 @@
   'use strict';
   globalThis.STB = globalThis.STB || {};
 
-  function todayStr() { return new Date().toISOString().slice(0, 10); }
+  function todayStr() {
+    const d = new Date();
+    return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') +
+      '-' + String(d.getDate()).padStart(2, '0');
+  }
 
   const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
   function fmtDate(iso) {
@@ -47,7 +51,8 @@
   }
   function amountInWords(amount) {
     let rupees = Math.floor(amount);
-    const paise = Math.round((amount - rupees) * 100);
+    let paise = Math.round((amount - rupees) * 100);
+    if (paise === 100) { rupees += 1; paise = 0; }
     const parts = [];
     const crore = Math.floor(rupees / 1e7); rupees %= 1e7;
     const lakh = Math.floor(rupees / 1e5); rupees %= 1e5;
