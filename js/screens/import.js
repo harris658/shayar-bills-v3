@@ -90,7 +90,7 @@
             const parsed = STB.statement.applyMapping(st.rows, st.mapping);
             const existing = await STB.db.listBankTxns();
             const fresh = STB.statement.dedupe(parsed, existing);
-            const pending = STB.store.bills.filter((b) => b.status === 'pending');
+            const pending = STB.store.bills.filter((b) => b.status === 'pending' && b.type === 'paid');
             st.proposal = STB.matching.proposeMatches(fresh, pending);
             st.skipped = parsed.length - fresh.length;
             st.step = 'review';
