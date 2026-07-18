@@ -5,6 +5,9 @@
 
   // Screen-local UI state survives re-renders within the session.
   const ui = { status: 'all', type: 'all', party: 'all', q: '', from: '', to: '' };
+  // Print-selection ticks survive re-renders (focus refresh, filter/search
+  // changes) within a visit. Cleared once "Print vouchers" hands off.
+  const selected = new Set();
 
   STB.screens.bills = {
     render(root) {
@@ -34,7 +37,7 @@
         const cls = b.type === 'received' ? 'text-pos' : 'text-neg';
         return `
         <tr data-id="${b.id}">
-          <td><input type="checkbox" class="sel" data-id="${b.id}"></td>
+          <td><input type="checkbox" class="sel" data-id="${b.id}"${selected.has(b.id) ? ' checked' : ''}></td>
           <td>${U.fmtDate(b.bill_date)}</td>
           <td><a href="#/party/${b.party_id}">${U.escapeHTML(p ? p.name : '?')}</a></td>
           <td>${U.escapeHTML(b.note || '')}</td>
@@ -86,6 +89,11 @@
         const q = root.querySelector('#q'); q.focus(); q.setSelectionRange(q.value.length, q.value.length);
       });
 
+      root.querySelectorAll('.sel').forEach((cb) => cb.addEventListener('change', (e) => {
+        if (e.target.checked) selected.add(e.target.dataset.id);
+        else selected.delete(e.target.dataset.id);
+      }));
+
       root.querySelectorAll('.mark-paid').forEach((btn) => btn.addEventListener('click', async () => {
         if (btn.disabled) return;
         const ref = prompt('Bank ref number (leave empty for cash/none):');
@@ -125,9 +133,13 @@
       }));
 
       root.querySelector('#print-sel').addEventListener('click', () => {
-        const ids = Array.from(root.querySelectorAll('.sel:checked')).map((c) => c.dataset.id);
+        // Iterate STB.store.bills (not the Set) so the resulting array keeps
+        // the original table/store order — matches the pre-fix .sel:checked
+        // behaviour — and naturally drops any ticked id no longer in the store.
+        const ids = STB.store.bills.filter((b) => selected.has(b.id)).map((b) => b.id);
         if (!ids.length) { STB.toast('Tick some bills first'); return; }
         STB.printSelection = ids;
+        selected.clear();
         STB.nav('#/print/vouchers');
       });
     }
