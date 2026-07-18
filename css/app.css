@@ -72,3 +72,23 @@ table.tbl { width: 100%; border-collapse: collapse; }
 .match-line { display: flex; gap: 10px; align-items: baseline; padding: 7px 4px;
   border-bottom: 1px solid var(--line); flex-wrap: wrap; }
 .match-line input { width: auto; }
+.voucher { background: #fff; border: 1px solid #999; border-radius: 6px;
+  padding: 18px 22px; max-width: 640px; margin: 0 auto 16px;
+  page-break-inside: avoid; }
+.v-head { display: flex; justify-content: space-between; align-items: baseline;
+  border-bottom: 2px solid #222; padding-bottom: 8px; margin-bottom: 12px;
+  letter-spacing: .06em; }
+.v-grid { display: grid; grid-template-columns: 110px 1fr; gap: 7px 14px; }
+.v-grid span { color: #555; font-size: 13px; }
+.v-sign { display: flex; justify-content: space-between; margin-top: 44px;
+  padding-top: 8px; }
+.v-sign span { border-top: 1px solid #444; padding: 4px 18px 0; font-size: 13px; }
+.stmt { background: #fff; padding: 18px 22px; max-width: 760px; margin: 0 auto; }
+@media print {
+  body * { visibility: hidden; }
+  .print-area, .print-area * { visibility: visible; }
+  .print-area { position: absolute; left: 0; top: 0; width: 100%; }
+  .voucher { border-radius: 0; margin-bottom: 10mm; }
+  .no-print { display: none !important; }
+  .tbl-wrap { overflow: visible; }
+}
