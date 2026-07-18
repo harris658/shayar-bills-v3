@@ -62,11 +62,12 @@ test('applyMapping drops zero and negative amounts', () => {
 });
 
 test('extractRef pulls the clean reference number', () => {
-  // SBI NEFT: real UTR lives in the description, ref col has internal INB code
+  // Harshit decision 2026-07-18: prefer the statement's own Ref column code
+  // (SBI INB reference) over the UTR buried in the description
   assert.equal(S.extractRef(
     'NEFT INB: CNAFGBGAP7                              TRANSFER TO 4697159044305 / Sanjiv Beri',
     'TO TRANSFER-INB NEFT UTR NO: SBIN326186307700--Sanjiv Beri'
-  ), 'SBIN326186307700');
+  ), 'CNAFGBGAP7');
   // SBI internal transfer: no UTR, ref col leads with the reference token
   assert.equal(S.extractRef(
     'CT0AGNUQY5               TRANSFER TO 35655215923                           Mr. HARSHIT  JAIN / ',
@@ -74,6 +75,11 @@ test('extractRef pulls the clean reference number', () => {
   ), 'CT0AGNUQY5');
   // digits-only account numbers and plain words are never picked as the ref
   assert.equal(S.extractRef('TRANSFER TO 4697159044305 / Sanjiv Beri', 'BY CASH--'), 'TRANSFER TO 4697159044305 / Sanjiv Beri');
+  // ref col with no usable token: UTR from description is the fallback
+  assert.equal(S.extractRef(
+    'TRANSFER FROM 99509044300 / ',
+    'BY TRANSFER-INB NEFT UTR NO: SBIN999000111222--Somebody'
+  ), 'SBIN999000111222');
   // NEFT-star format (HDFC style) falls back to the mixed token in description
   assert.equal(S.extractRef(
     'TRANSFER FROM 99509044300 / ',
@@ -92,7 +98,7 @@ test('applyMapping stores the extracted ref', () => {
      '84,341'],
   ];
   const txns = S.applyMapping(rows, { dateCol: 0, descCol: 1, refCol: 2, amountCol: 3, headerRows: 0 });
-  assert.equal(txns[0].ref, 'SBIN326186307700');
+  assert.equal(txns[0].ref, 'CNAFGBGAP7');
 });
 
 test('dedupe by ref|amount|date', () => {

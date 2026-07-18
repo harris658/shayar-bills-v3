@@ -66,11 +66,14 @@
     return '';
   }
 
+  // Ref-column code first (Harshit 2026-07-18: matches what the SBI portal
+  // shows), then UTR from the description, then any description token.
   function extractRef(ref, description) {
+    const fromRef = refToken(ref);
+    if (fromRef) return fromRef;
     const utr = String(description == null ? '' : description).match(/UTR\s*NO\s*[.:]*\s*([A-Za-z0-9]+)/i);
     if (utr) return utr[1];
-    return refToken(ref) || refToken(description) ||
-      String(ref == null ? '' : ref).trim();
+    return refToken(description) || String(ref == null ? '' : ref).trim();
   }
 
   function applyMapping(rows, mapping) {
