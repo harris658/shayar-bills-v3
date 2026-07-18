@@ -13,6 +13,7 @@ create table bills (
   amount numeric not null check (amount > 0),
   bill_date date not null,
   note text not null default '',
+  amount_expr text not null default '',
   status text not null default 'pending' check (status in ('pending','paid')),
   payment_ref text not null default '',
   payment_date date,

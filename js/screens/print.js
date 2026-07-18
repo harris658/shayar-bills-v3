@@ -14,6 +14,7 @@
           <span>Date</span><b>${U.fmtDate(b.bill_date)}</b>
           <span>Party</span><b>${U.escapeHTML(p ? p.name : '?')}</b>
           <span>Amount</span><b>${U.money(b.amount)}</b>
+          ${b.amount_expr ? `<span>Breakdown</span><b>${U.escapeHTML(b.amount_expr)} = ${U.money(b.amount)}</b>` : ''}
           <span>In words</span><b>Rupees ${U.amountInWords(Number(b.amount))} Only</b>
           <span>Ref No.</span><b>${U.escapeHTML(b.payment_ref || '—')}</b>
           <span>Note</span><b>${U.escapeHTML(b.note || '—')}</b>

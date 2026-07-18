@@ -119,8 +119,12 @@
       async function save(addAnother) {
         if (saving) return;
         const name = party.value.trim();
-        const v = U$.safeEval(amount.value.trim());
+        const raw = amount.value.trim();
+        const v = U$.safeEval(raw);
         const amt = Number.isNaN(v) ? 0 : Math.round(v * 100) / 100;
+        // Keep the typed breakdown ("1200+850") for the voucher; a plain
+        // number stores nothing. Operator anywhere, or a minus past char 1.
+        const amount_expr = /[+*/]|(?!^)-/.test(raw) ? raw : '';
         if (!name) { STB.toast('Party is required'); party.focus(); return; }
         if (!(amt > 0)) { STB.toast('Amount must be more than 0'); amount.focus(); return; }
         saving = true;
@@ -130,10 +134,12 @@
             p = await STB.db.createParty(name);
             STB.store.parties.push(p);
           }
-          await STB.db.createBill({
+          const bill = {
             party_id: p.id, type, amount: amt,
             bill_date: date.value || U$.todayStr(), note: note.value.trim()
-          });
+          };
+          if (amount_expr) bill.amount_expr = amount_expr;
+          await STB.db.createBill(bill);
           STB.toast('Bill saved ✓');
           if (addAnother) {
             party.value = ''; amount.value = ''; note.value = '';
