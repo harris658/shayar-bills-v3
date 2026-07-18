@@ -29,6 +29,12 @@
           <p class="hint" style="margin-top:14px">v2 import: use the file from the old
           app's More → Backup. All v2 bills come in as PAID history. Run once only —
           running twice duplicates them.</p>
+          <div style="border-top:1px solid var(--line);margin-top:18px;padding-top:14px">
+            <button class="btn ghost" id="del-all" style="color:#b91c1c">Delete ALL bills…</button>
+            <p class="hint" style="margin-top:8px">Deletes every bill — pending AND paid —
+            plus all imported bank transactions. Parties are kept. Cannot be undone;
+            download a JSON backup first.</p>
+          </div>
         </div>`;
 
       root.querySelector('#exp-csv').addEventListener('click', () => {
@@ -108,6 +114,26 @@
           impBtn.disabled = false;
         }
       };
+
+      const delBtn = root.querySelector('#del-all');
+      delBtn.addEventListener('click', async () => {
+        if (delBtn.disabled) return;
+        const n = STB.store.bills.length;
+        if (!n) { STB.toast('No bills to delete'); return; }
+        if (!confirm(`Delete ALL ${n} bill(s) — pending AND paid — plus every imported bank transaction? Parties are kept. This cannot be undone.`)) return;
+        if (prompt('Type DELETE to confirm:') !== 'DELETE') { STB.toast('Cancelled — nothing deleted'); return; }
+        delBtn.disabled = true;
+        try {
+          await STB.db.deleteAllBills();
+          STB.toast(`Deleted ${n} bill(s) and all imported bank transactions`);
+          await STB.refresh();
+        } catch (err) {
+          console.error('deleteAllBills failed', err);
+          STB.toast('Delete failed — check connection');
+        } finally {
+          delBtn.disabled = false;
+        }
+      });
     }
   };
 })();

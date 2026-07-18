@@ -48,6 +48,15 @@
       const { error } = await client.from('bills').delete().eq('id', id);
       if (error) throw error;
     },
+    // Wipes bills AND imported bank txns (txns reference bills and, kept
+    // alone, would dedupe-block re-importing old statements). Parties stay.
+    async deleteAllBills() {
+      const NIL = '00000000-0000-0000-0000-000000000000';
+      let r = await client.from('bank_txns').delete().neq('id', NIL);
+      if (r.error) throw r.error;
+      r = await client.from('bills').delete().neq('id', NIL);
+      if (r.error) throw r.error;
+    },
     async listBankTxns() {
       const { data, error } = await client.from('bank_txns').select('*');
       if (error) throw error;
