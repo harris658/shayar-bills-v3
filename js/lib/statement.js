@@ -90,9 +90,13 @@
       return file.text().then(parseCSV);
     }
     return file.arrayBuffer().then((buf) => {
-      const wb = XLSX.read(buf, { type: 'array' });
+      // cellDates+cellText:false+dateNF force date cells to ISO strings.
+      // Without them, cells carrying Excel's default date format (real SBI
+      // exports do) render as m/d/yy US order, which parseDate misreads as
+      // D/M/YY — silently swapping day/month or dropping days > 12.
+      const wb = XLSX.read(buf, { type: 'array', cellDates: true, cellText: false });
       const ws = wb.Sheets[wb.SheetNames[0]];
-      return XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, defval: '' });
+      return XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, defval: '', dateNF: 'yyyy-mm-dd' });
     });
   }
 
