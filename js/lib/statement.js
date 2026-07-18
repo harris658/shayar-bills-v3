@@ -58,6 +58,21 @@
     return Number(cleaned);
   }
 
+  // First 8-22 char token containing both letters and digits — bank reference
+  // codes look like that; plain words and digits-only account numbers don't.
+  function refToken(s) {
+    const cands = String(s == null ? '' : s).match(/[A-Za-z0-9]{8,22}/g) || [];
+    for (const c of cands) if (/[A-Za-z]/.test(c) && /\d/.test(c)) return c;
+    return '';
+  }
+
+  function extractRef(ref, description) {
+    const utr = String(description == null ? '' : description).match(/UTR\s*NO\s*[.:]*\s*([A-Za-z0-9]+)/i);
+    if (utr) return utr[1];
+    return refToken(ref) || refToken(description) ||
+      String(ref == null ? '' : ref).trim();
+  }
+
   function applyMapping(rows, mapping) {
     const out = [];
     for (let i = mapping.headerRows || 0; i < rows.length; i++) {
@@ -65,10 +80,10 @@
       const txn_date = parseDate(r[mapping.dateCol]);
       const amount = parseAmount(r[mapping.amountCol]);
       if (!txn_date || !(amount > 0)) continue;
+      const description = String(r[mapping.descCol] == null ? '' : r[mapping.descCol]).trim();
       out.push({
-        txn_date, amount,
-        ref: String(r[mapping.refCol] == null ? '' : r[mapping.refCol]).trim(),
-        description: String(r[mapping.descCol] == null ? '' : r[mapping.descCol]).trim()
+        txn_date, amount, description,
+        ref: extractRef(r[mapping.refCol], description)
       });
     }
     return out;
@@ -106,6 +121,6 @@
     try { return JSON.parse(localStorage.getItem(MAP_KEY)) || null; } catch (e) { return null; }
   }
 
-  STB.statement = { parseCSV, parseDate, parseAmount, applyMapping, dedupe,
-    fileToRows, saveMapping, loadMapping };
+  STB.statement = { parseCSV, parseDate, parseAmount, extractRef, applyMapping,
+    dedupe, fileToRows, saveMapping, loadMapping };
 })();
