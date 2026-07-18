@@ -24,4 +24,6 @@ Schema lives in `supabase/schema.sql` — paste into the Supabase SQL Editor for
 
 ## Live URL
 
-TBD — deployed after Supabase project is provisioned.
+https://harris658.github.io/shayar-bills-v3/
+
+Login works once `js/config.js` carries the real Supabase project credentials.
