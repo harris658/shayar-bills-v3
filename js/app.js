@@ -17,6 +17,11 @@
   STB.store = { parties: [], bills: [], loaded: false };
   STB.partyById = (id) => STB.store.parties.find((p) => p.id === id);
 
+  // Matches every hard auth failure the Apps Script server throws (see
+  // apps-script/Auth.gs): a missing/expired token, a token minted for a
+  // different client, an unverified email, and an allowlist rejection.
+  const AUTH_DEAD_RE = /session expired|not signed in|not authorised|token not for this app|email not verified/i;
+
   STB.refresh = async function () {
     try {
       const { parties, bills } = await STB.db.snapshot();
@@ -28,9 +33,16 @@
       console.error('refresh failed', e);
       // A dead session must land on the sign-in screen, not a toast that
       // leaves a stale ledger on screen looking live.
-      if (/session expired|not signed in|not authorised/i.test(e.message || '')) {
+      if (AUTH_DEAD_RE.test(e.message || '')) {
+        // The token can still be locally valid (e.g. an allowlist
+        // rejection) — clear it so getSession() stops reporting a session
+        // that the server has already refused, and so a stale route change
+        // (hashchange) can't render data screens over it.
+        STB.auth.clear();
+        STB.store.loaded = false;
         topbar.hidden = true;
-        STB.screens.login.render(root, true);
+        renderedRoute = null;
+        STB.screens.login.render(root, e.message || true);
         return;
       }
       STB.toast('Could not refresh data — check connection');
@@ -72,18 +84,38 @@
   }
   STB.renderRoute = renderRoute;
 
-  STB.boot = async function () {
+  function configPlaceholderPending() {
+    const c = STB.config || {};
+    return String(c.APPS_SCRIPT_URL || '').indexOf('<PASTE') === 0
+      || String(c.GOOGLE_CLIENT_ID || '').indexOf('<PASTE') === 0;
+  }
+
+  STB.boot = async function (opts) {
+    opts = opts || {};
+    if (configPlaceholderPending()) {
+      topbar.hidden = true;
+      renderedRoute = null;
+      root.innerHTML = `
+        <div class="card" style="max-width:380px;margin:60px auto;text-align:center">
+          <h2 style="margin-top:0">Shayar Tex — Bills</h2>
+          <p class="hint">Configuration not filled in yet — set APPS_SCRIPT_URL and
+          GOOGLE_CLIENT_ID in js/config.js.</p>
+        </div>`;
+      return;
+    }
     const session = await STB.db.getSession();
     if (!session) {
       topbar.hidden = true;
-      // Try a silent renew before making anyone tap. Fails quietly with
-      // multiple Google accounts or blocked third-party cookies.
-      try {
-        await STB.auth.renew();
-      } catch (e) {
-        STB.screens.login.render(root, false);
-        return;
+      renderedRoute = null;
+      // Paint the sign-in button immediately rather than blocking first
+      // paint on renew()'s 8s prompt() timeout. A successful silent renewal
+      // upgrades straight past it. Skipped on the explicit sign-out path —
+      // the user just asked to leave.
+      STB.screens.login.render(root, false);
+      if (!opts.skipRenew) {
+        STB.auth.renew().then(() => { STB.boot(); }).catch(() => {});
       }
+      return;
     }
     topbar.hidden = false;
     if (!location.hash || location.hash === '#/') location.hash = '#/dashboard';
@@ -98,7 +130,7 @@
   document.getElementById('signout-btn').addEventListener('click', async () => {
     await STB.db.signOut();
     location.hash = '';
-    STB.boot();
+    STB.boot({ skipRenew: true });
   });
 
   STB.boot();
