@@ -75,6 +75,62 @@ function setCells_(t, rowNum, patch) {
   });
 }
 
+/**
+ * Batched multi-row patch for cases where setCells_'s one-setValue-per-field
+ * cost is too slow (e.g. marking 150 bills paid from a single statement
+ * import inside a held lock). Merges duplicate rowNums (last patch wins per
+ * field), groups contiguous rows into a single range read+write, and touches
+ * only the span of columns actually patched. Does not change setCells_ or
+ * its behaviour for existing single-row callers.
+ */
+function setCellsBatch_(t, patches) {
+  if (!patches || !patches.length) return;
+
+  const byRow = {};
+  const order = [];
+  patches.forEach(function (p) {
+    if (!byRow[p.rowNum]) {
+      byRow[p.rowNum] = { rowNum: p.rowNum, patch: {} };
+      order.push(p.rowNum);
+    }
+    Object.keys(p.patch).forEach(function (k) {
+      byRow[p.rowNum].patch[k] = p.patch[k];
+    });
+  });
+  const merged = order
+    .sort(function (a, b) { return a - b; })
+    .map(function (r) { return byRow[r]; });
+
+  const cols = [];
+  merged.forEach(function (p) {
+    Object.keys(p.patch).forEach(function (k) {
+      if (t.index[k] !== undefined) cols.push(t.index[k]);
+    });
+  });
+  if (!cols.length) return;
+  const minCol = Math.min.apply(null, cols);
+  const maxCol = Math.max.apply(null, cols);
+  const width = maxCol - minCol + 1;
+
+  let i = 0;
+  while (i < merged.length) {
+    let j = i;
+    while (j + 1 < merged.length && merged[j + 1].rowNum === merged[j].rowNum + 1) j++;
+    const startRow = merged[i].rowNum;
+    const rowCount = j - i + 1;
+    const range = t.sheet.getRange(startRow, minCol + 1, rowCount, width);
+    const values = range.getValues();
+    for (let r = i; r <= j; r++) {
+      const rowValues = values[r - i];
+      Object.keys(merged[r].patch).forEach(function (k) {
+        if (t.index[k] !== undefined) rowValues[t.index[k] - minCol] = merged[r].patch[k];
+      });
+    }
+    range.setValues(values);
+    i = j + 1;
+  }
+}
+
 function clearRows_(name) {
   const sh = sheet_(name);
   const last = sh.getLastRow();

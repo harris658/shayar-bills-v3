@@ -157,34 +157,60 @@ function txnRow_(t, txn, matchedBillId) {
 }
 
 /**
- * One locked call does the whole statement import: insert every txn and mark
- * every matched bill paid. Replaces the old two-requests-per-match loop.
+ * One locked call does the whole statement import: insert every new txn and
+ * mark every matched bill paid.
+ *
+ * Ordering matters for partial-failure recovery: every bank_txns write
+ * happens before any bill is marked, so a mid-run timeout leaves recorded-
+ * but-unmarked state (safe — a re-run finishes the job) rather than
+ * marked-but-unrecorded state (which looks, from applied/txns, like nothing
+ * happened at all).
+ *
+ * A (ref, amount, txn_date) triple already present — in the sheet, or
+ * repeated within this payload — is never re-inserted. If that triple shows
+ * up again inside `matches`, its bill is still marked paid and the existing
+ * txn row's matched_bill_id is corrected; the match is not silently dropped.
  */
 function applyImport_(matches, unmatchedTxns) {
   matches = matches || [];
   unmatchedTxns = unmatchedTxns || [];
 
   const txT = table_('bank_txns');
-  const seen = {};
+  const seen = {}; // key -> existing row's id, or true once queued/handled this call
   txT.rows.forEach(function (r) {
-    seen[txnKey_(r[txT.index.ref], r[txT.index.amount], r[txT.index.txn_date])] = true;
+    seen[txnKey_(r[txT.index.ref], r[txT.index.amount], r[txT.index.txn_date])] = r[txT.index.id];
   });
 
   const billT = table_('bills');
   const newRows = [];
+  const billPatches = [];
   let applied = 0;
 
   matches.forEach(function (m) {
     const key = txnKey_(m.txn.ref, m.txn.amount, m.txn.txn_date);
-    if (seen[key]) return;
-    seen[key] = true;
-    newRows.push(txnRow_(txT, m.txn, m.bill_id));
-    const rowNum = findRow_(billT, m.bill_id);
-    if (rowNum > 0) {
-      setCells_(billT, rowNum, {
-        status: 'paid',
-        payment_ref: String(m.txn.ref || ''),
-        payment_date: isoDate_(m.txn.txn_date)
+    const existing = seen[key];
+    if (existing === undefined) {
+      seen[key] = true;
+      newRows.push(txnRow_(txT, m.txn, m.bill_id));
+    } else if (existing !== true) {
+      // Already sitting in the sheet from a previous import — this call is
+      // correcting or adding its match, not re-inserting the row.
+      const existingRowNum = findRow_(txT, existing);
+      if (existingRowNum > 0) setCells_(txT, existingRowNum, { matched_bill_id: m.bill_id });
+      seen[key] = true;
+    }
+
+    // Runs for every match, dedupe hit or not — a re-matched txn must still
+    // pay its bill, not vanish into {applied: 0, txns: 0}.
+    const billRowNum = findRow_(billT, m.bill_id);
+    if (billRowNum > 0) {
+      billPatches.push({
+        rowNum: billRowNum,
+        patch: {
+          status: 'paid',
+          payment_ref: String(m.txn.ref || ''),
+          payment_date: isoDate_(m.txn.txn_date)
+        }
       });
       applied++;
     }
@@ -198,9 +224,18 @@ function applyImport_(matches, unmatchedTxns) {
   });
 
   if (newRows.length) {
-    txT.sheet
-      .getRange(txT.sheet.getLastRow() + 1, 1, newRows.length, txT.headers.length)
-      .setValues(newRows);
+    const startRow = txT.sheet.getLastRow() + 1;
+    // Force the ref column to plain text before writing. Left to Sheets'
+    // type inference, a digits-only ref (e.g. "007123456") is stored as a
+    // number, and String()-ing it back on the next import no longer equals
+    // the incoming ref — txnKey_ silently stops matching and the dedupe
+    // defence that replaced Postgres's unique constraint breaks.
+    txT.sheet.getRange(startRow, txT.index.ref + 1, newRows.length, 1).setNumberFormat('@');
+    txT.sheet.getRange(startRow, 1, newRows.length, txT.headers.length).setValues(newRows);
   }
+
+  // Batched, and only after every txn-table write above has landed.
+  setCellsBatch_(billT, billPatches);
+
   return { applied: applied, txns: newRows.length };
 }
