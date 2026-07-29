@@ -108,14 +108,21 @@ for (const tab of Object.keys(HEADERS)) {
 // would render as ₹NaN on a Dashboard tile after import. `Number(null)` is
 // `0` (same coercion ledger.js uses) and must keep passing, as must a
 // legitimately negative amount or a zero amount.
+// Same fallback findFormulaRisk uses below: prefer id, and when a row has
+// none, name it by index rather than pushing undefined — this is the abort
+// gate on a one-shot migration and the owner must be able to find the row.
+function rowLabel(row, index) {
+  return row.id !== undefined && row.id !== null ? row.id : '#' + index;
+}
+
 const badBillAmounts = [];
-for (const b of data.bills || []) {
-  if (!Number.isFinite(Number(b.amount))) badBillAmounts.push(b.id);
-}
+(data.bills || []).forEach((b, i) => {
+  if (!Number.isFinite(Number(b.amount))) badBillAmounts.push(rowLabel(b, i));
+});
 const badTxnAmounts = [];
-for (const t of data.bank_txns || []) {
-  if (!Number.isFinite(Number(t.amount))) badTxnAmounts.push(t.id);
-}
+(data.bank_txns || []).forEach((t, i) => {
+  if (!Number.isFinite(Number(t.amount))) badTxnAmounts.push(rowLabel(t, i));
+});
 if (badBillAmounts.length || badTxnAmounts.length) {
   console.error(`\nrefusing to write output — non-numeric amount(s) found:`);
   if (badBillAmounts.length) console.error(`  bills: ${badBillAmounts.join(', ')}`);

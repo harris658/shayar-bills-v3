@@ -54,3 +54,12 @@ Login works once `js/config.js` carries the real `APPS_SCRIPT_URL` and
 script property is set to that same value — a mismatch between the two is
 the most likely first-setup failure, and it surfaces as `token not for this
 app`.
+
+## Known limitation: mid-session auth failures are briefly misleading
+
+The app only routes to the sign-in screen on its periodic refresh
+(`STB.refresh` in `js/app.js`), so if a user is removed from `allowed_users`
+mid-session, a write they attempt fails with a generic "check connection"
+toast, not a clear "you've been signed out" message — the bounce to sign-in
+only happens once the next window-focus refresh runs. It self-heals within
+one focus event; it's a known rough edge, not a bug.

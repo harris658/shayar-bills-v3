@@ -18,6 +18,40 @@ only resolves for a bound script.
 Paste each file's contents into a file of the same name in the script editor.
 There is no automated deploy; this is a copy-paste project by design.
 
+## Spreadsheet layout
+
+Columns are located by header text (`table_()` in `Sheets.gs`), not position —
+but the header text itself is load-bearing: rename or misspell one and the
+tab silently stops working. This list is the only copy of the schema in this
+repo; it is cross-checked against `Sheets.gs`, `Code.gs`, `Auth.gs`, and
+`scripts/backup-to-sheet.mjs`'s `HEADERS` constant, which must always agree
+with it.
+
+| Tab | Columns (A → …), in order |
+| --- | --- |
+| `parties` | id, name, phone, notes, created_at |
+| `bills` | id, party_id, type, amount, bill_date, note, amount_expr, status, payment_ref, payment_date, created_by, created_at |
+| `bank_txns` | id, txn_date, amount, ref, description, matched_bill_id, imported_at |
+| `allowed_users` | email, active |
+
+`allowed_users` is the one tab `scripts/backup-to-sheet.mjs` does not touch —
+it's maintained by hand, one row per person, `active` set to `TRUE`/`FALSE`.
+It's also the one tab allowed to have no `id` column (`table_()` in
+`Sheets.gs` special-cases it).
+
+**Columns that must be formatted as plain text** (select the column → Format
+→ Number → Plain text, before any data goes in):
+
+- `bills!E` (bill_date), `bills!J` (payment_date), `bank_txns!B` (txn_date) —
+  otherwise Sheets can silently reinterpret a date near midnight and evening
+  entries land on the wrong day.
+- `bank_txns!D` (ref) — otherwise a zero-padded ref (e.g. `007123456`) is
+  stored as the number `7123456`, and the next import of the same statement
+  no longer recognises it as already-seen: the duplicate guard fails and the
+  whole statement re-imports.
+- `bills!I` (payment_ref) — otherwise a UTR like `007123456` loses its
+  leading zeros and prints wrong on the voucher.
+
 ## Script properties
 
 Project Settings → Script Properties:

@@ -75,6 +75,20 @@ function runTests() {
     const second = applyImport_([], [txn]);
     assert_(second.txns === 0, 're-importing the same txn inserts nothing');
 
+    // --- a digits-only, zero-padded ref still dedupes a re-import. Without
+    // applyImport_'s setNumberFormat('@') guard on the ref column, Sheets
+    // would store '00<stamp>' as the number <stamp>, String()-ing it back
+    // would drop the leading zeros, txnKey_ would no longer match on
+    // re-import, and the whole statement would re-import — re-marking every
+    // matched bill paid. This is the highest-consequence path on the branch.
+    const digitsRef = '00' + stamp;
+    const digitsTxn = { txn_date: '2026-02-10', amount: 42, ref: digitsRef, description: 'digits-only ref' };
+    const digitsFirst = applyImport_([], [digitsTxn]);
+    assert_(digitsFirst.txns === 1, 'digits-only ref: first import inserts the txn');
+    const digitsSecond = applyImport_([], [digitsTxn]);
+    assert_(digitsSecond.txns === 0,
+      'digits-only, zero-padded ref still dedupes a re-import, got txns=' + digitsSecond.txns);
+
     // --- a matched import inserts the txn and marks the bill paid in one call
     const bill2 = createBill_({
       party_id: p.id, type: 'paid', amount: 500,

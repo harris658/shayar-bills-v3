@@ -162,14 +162,26 @@ function txnRow_(t, txn, matchedBillId) {
  *
  * Ordering matters for partial-failure recovery: every bank_txns write
  * happens before any bill is marked, so a mid-run timeout leaves recorded-
- * but-unmarked state (safe — a re-run finishes the job) rather than
- * marked-but-unrecorded state (which looks, from applied/txns, like nothing
- * happened at all).
+ * but-unmarked state — safe, and finishable by calling this function again
+ * with the same matches (see below for how) — rather than marked-but-
+ * unrecorded state (which looks, from applied/txns, like nothing happened
+ * at all).
  *
  * A (ref, amount, txn_date) triple already present — in the sheet, or
  * repeated within this payload — is never re-inserted. If that triple shows
  * up again inside `matches`, its bill is still marked paid and the existing
  * txn row's matched_bill_id is corrected; the match is not silently dropped.
+ *
+ * This "recorded-but-unmarked" state can only be finished by calling
+ * applyImport_ again directly with the same matches (as Tests.gs's
+ * re-import case does) — it is NOT reachable by re-running the import
+ * screen. js/screens/import.js dedupes the parsed statement against
+ * listBankTxns() on the client, before it ever builds `matches`, so an
+ * already-inserted txn is filtered out client-side and its bill's
+ * `matches` entry never gets rebuilt or resent. Recovering a partial run
+ * today means calling applyImport with the original matches from outside
+ * the app (the script editor, or a one-off request) — there is no UI path
+ * to it.
  */
 function applyImport_(matches, unmatchedTxns) {
   matches = matches || [];

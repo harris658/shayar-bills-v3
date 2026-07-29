@@ -31,7 +31,25 @@
         headers: { 'Content-Type': 'text/plain;charset=utf-8' },
         body: JSON.stringify({ action: action, args: args || {}, idToken: token })
       });
-      const out = await res.json();
+      // A misconfigured deployment (a /dev URL, a stale deployment, or one
+      // not set to "Anyone") still answers 200, but with an HTML login page
+      // instead of {ok, data}. res.json() then throws a bare SyntaxError
+      // that AUTH_DEAD_RE (js/app.js) does not match, so the owner sees
+      // "check connection" with nothing to act on. Naming the real cause
+      // here — before that generic parse error escapes — is the only way
+      // to get a useful message onto screen.
+      let out;
+      try {
+        out = await res.json();
+      } catch (parseErr) {
+        out = undefined;
+      }
+      if (res.ok === false || out === undefined || typeof out !== 'object') {
+        throw new Error(
+          'Backend did not return JSON — check APPS_SCRIPT_URL and that the ' +
+          'deployment is set to "Anyone" (HTTP ' + res.status + ')'
+        );
+      }
       if (out.ok) return out.data;
       // Another user holds the write lock — one retry, then give up.
       if (out.error === 'busy' && attempt === 0) {

@@ -11,6 +11,18 @@ function fakeFetch(url, opts) {
   return Promise.resolve({ json: () => Promise.resolve(body) });
 }
 
+// A misconfigured deployment answers 200 with an HTML login page, not JSON —
+// this fake mirrors that: .json() throws, exactly like the real body's
+// SyntaxError on '<html>...'.
+function fakeFetchNonJson(url, opts) {
+  calls.push({ url, opts });
+  return Promise.resolve({
+    ok: true,
+    status: 200,
+    json: () => Promise.reject(new SyntaxError('Unexpected token < in JSON at position 0'))
+  });
+}
+
 globalThis.STB = {
   env: { fetch: fakeFetch },
   config: { APPS_SCRIPT_URL: 'https://script.example/exec' },
@@ -95,6 +107,22 @@ test('snapshot fetches parties and bills in a single request', async () => {
   assert.equal(JSON.parse(calls[0].opts.body).action, 'snapshot');
   assert.equal(out.parties.length, 1);
   assert.equal(out.bills.length, 1);
+});
+
+test('a non-JSON response names the URL/deployment instead of a raw SyntaxError', async () => {
+  reset();
+  const saved = STB.env.fetch;
+  STB.env.fetch = fakeFetchNonJson;
+  await assert.rejects(
+    () => db.listBills(),
+    (err) => {
+      assert.ok(!(err instanceof SyntaxError), 'must not leak the raw SyntaxError');
+      assert.match(err.message, /APPS_SCRIPT_URL/);
+      assert.match(err.message, /deployment/i);
+      return true;
+    }
+  );
+  STB.env.fetch = saved;
 });
 
 test('an unrenewable session rejects without hitting the network', async () => {
