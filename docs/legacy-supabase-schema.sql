@@ -1,3 +1,7 @@
+-- Historical. The app moved to a Google Sheets backend on 2026-07-29; see
+-- docs/superpowers/specs/2026-07-29-shayar-bills-v3-sheets-backend-design.md
+-- (in the Haru Cowork OS repo). Kept as a record of the original data shape.
+
 create table parties (
   id uuid primary key default gen_random_uuid(),
   name text not null unique,
