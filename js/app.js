@@ -40,8 +40,9 @@
         // (hashchange) can't render data screens over it. signOut() (not
         // clear()) also disables auto-select, so a reload doesn't silently
         // re-mint the same rejected identity and flash the app chrome
-        // before bouncing back to login.
-        STB.auth.signOut();
+        // before bouncing back to login. Routed through STB.db, matching
+        // every other call site in this file.
+        STB.db.signOut();
         STB.store.loaded = false;
         topbar.hidden = true;
         renderedRoute = null;
@@ -114,7 +115,7 @@
       // device clock could otherwise hand back a credential valid() always
       // rejects, looping forever). A brand-new visitor has no stored token,
       // so this never runs and the sign-in button paints immediately with
-      // no 8s timer anywhere near it.
+      // no renewal timer anywhere near it.
       //
       // Awaiting renew() fully (success or failure) before ever rendering
       // the button, rather than racing the two, matters because
@@ -125,12 +126,26 @@
       // callback is always the last one registered, so a tap always works
       // regardless of when it happens.
       if (!opts.skipRenew && !opts.renewed && STB.auth.get()) {
+        topbar.hidden = true;
+        renderedRoute = null;
+        // Paint something before the await — otherwise the viewport is
+        // blank white for the whole renewal timeout with no feedback
+        // (task-6 review round 3). Replaced outright by whatever boot()
+        // renders next; no teardown needed.
+        root.innerHTML = `
+          <div class="card" style="max-width:380px;margin:60px auto;text-align:center">
+            <h2 style="margin-top:0">Shayar Tex — Bills</h2>
+            <p class="hint">Restoring your session…</p>
+          </div>`;
         try { await STB.auth.renew(); } catch (e) { /* fall through to login below */ }
         return STB.boot({ renewed: true });
       }
       topbar.hidden = true;
       renderedRoute = null;
-      STB.screens.login.render(root, false);
+      // opts.renewed is set only when a renewal was just attempted and
+      // failed — show the "session expired" copy rather than the
+      // cold-start greeting.
+      STB.screens.login.render(root, !!opts.renewed);
       return;
     }
     topbar.hidden = false;

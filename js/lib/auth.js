@@ -17,9 +17,12 @@
     return (STB.env && STB.env.google) || globalThis.google;
   }
 
-  // Injectable so tests don't have to wait out a real 8s timer.
+  // Injectable so tests don't have to wait out a real timer. prompt() either
+  // surfaces quickly or not at all, so the default is kept short — every
+  // extra second here is dead time on the exact path a returning user
+  // notices (see task-6 review round 3).
   function renewTimeoutMs() {
-    return (STB.env && STB.env.renewTimeoutMs) || 8000;
+    return (STB.env && STB.env.renewTimeoutMs) || 3000;
   }
 
   function claims(token) {
