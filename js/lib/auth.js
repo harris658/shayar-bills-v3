@@ -11,6 +11,17 @@
     return (STB.env && STB.env.storage) || globalThis.localStorage;
   }
 
+  // Same seam for the Google SDK, so tests can fake google.accounts.id
+  // instead of loading the real script.
+  function google() {
+    return (STB.env && STB.env.google) || globalThis.google;
+  }
+
+  // Injectable so tests don't have to wait out a real 8s timer.
+  function renewTimeoutMs() {
+    return (STB.env && STB.env.renewTimeoutMs) || 8000;
+  }
+
   function claims(token) {
     if (!token || typeof token !== 'string') return null;
     const parts = token.split('.');
@@ -61,9 +72,10 @@
     renew() {
       if (renewing) return renewing;
       renewing = new Promise((resolve, reject) => {
-        const gsi = globalThis.google && google.accounts && google.accounts.id;
+        const g = google();
+        const gsi = g && g.accounts && g.accounts.id;
         if (!gsi) { reject(new Error('session expired')); return; }
-        const timer = setTimeout(() => reject(new Error('session expired')), 8000);
+        const timer = setTimeout(() => reject(new Error('session expired')), renewTimeoutMs());
         gsi.initialize({
           client_id: STB.config.GOOGLE_CLIENT_ID,
           auto_select: true,
@@ -85,7 +97,8 @@
     /** Renders Google's own sign-in button into el and resolves when signed in. */
     renderButton(el) {
       return new Promise((resolve, reject) => {
-        const gsi = globalThis.google && google.accounts && google.accounts.id;
+        const g = google();
+        const gsi = g && g.accounts && g.accounts.id;
         if (!gsi) { reject(new Error('Google sign-in failed to load')); return; }
         gsi.initialize({
           client_id: STB.config.GOOGLE_CLIENT_ID,
@@ -104,7 +117,8 @@
 
     signOut() {
       this.clear();
-      const gsi = globalThis.google && google.accounts && google.accounts.id;
+      const g = google();
+      const gsi = g && g.accounts && g.accounts.id;
       if (gsi) gsi.disableAutoSelect();
     }
   };
