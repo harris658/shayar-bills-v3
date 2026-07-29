@@ -31,6 +31,28 @@ function toCsv(headers, rows) {
     .join('\n');
 }
 
+// Matches js/lib/util.js's money()/fmtAmount() exactly, so the printed figure
+// is a literal string match against the Dashboard tile, not a raw JS number.
+function fmtINR(n) {
+  return '₹' + Number(n).toLocaleString('en-IN', { maximumFractionDigits: 2 });
+}
+
+// Flags cells that a spreadsheet may parse as a formula on import (leading
+// =, +, - or @). Reported, never rewritten — altering the data silently
+// would be worse than leaving a warning for a manual check.
+function findFormulaRisk(tab, headers, rows) {
+  const risky = [];
+  for (const r of rows) {
+    for (const h of headers) {
+      const v = r[h];
+      if (v === null || v === undefined) continue;
+      const s = String(v);
+      if (/^[=+\-@]/.test(s)) risky.push({ tab, id: r.id, field: h, value: s });
+    }
+  }
+  return risky;
+}
+
 const [, , inPath, outDir = 'migration-out'] = process.argv;
 if (!inPath) {
   console.error('usage: node scripts/backup-to-sheet.mjs <backup.json> [outDir]');
@@ -65,19 +87,59 @@ for (const tab of Object.keys(HEADERS)) {
   }
 }
 
+// Every row must itself be an object — a null/array/primitive entry means the
+// backup is corrupt, and we'd rather name the offending index than crash
+// deep inside a .map() after some files are already on disk.
+for (const tab of Object.keys(HEADERS)) {
+  const rows = data[tab] || [];
+  rows.forEach((row, i) => {
+    if (row === null || typeof row !== 'object' || Array.isArray(row)) {
+      console.error(`${inPath}: "${tab}[${i}]" is not an object — refusing to write any output`);
+      process.exit(1);
+    }
+  });
+}
+
+// This is the only gate before an unrepeatable import: refuse to produce
+// output the app cannot render back correctly. A non-numeric amount on a
+// pending bill would corrupt the exact figure Step 5 checks against.
+const badAmounts = [];
+let toPay = 0;
+let toReceive = 0;
+for (const b of data.bills || []) {
+  if (b.status !== 'pending') continue;
+  const amt = Number(b.amount);
+  if (!Number.isFinite(amt)) {
+    badAmounts.push(b.id);
+    continue;
+  }
+  if (b.type === 'paid') toPay += amt; else toReceive += amt;
+}
+if (badAmounts.length) {
+  console.error(`\nrefusing to write output — pending bill(s) with a non-numeric amount: ${badAmounts.join(', ')}`);
+  process.exit(1);
+}
+
 mkdirSync(outDir, { recursive: true });
 
+const riskyCells = [];
 for (const [tab, headers] of Object.entries(HEADERS)) {
   const rows = data[tab] || [];
   writeFileSync(join(outDir, tab + '.csv'), toCsv(headers, rows) + '\n');
   console.log(`${tab}: ${rows.length} rows → ${join(outDir, tab + '.csv')}`);
+  riskyCells.push(...findFormulaRisk(tab, headers, rows));
 }
 
-const pending = (data.bills || [])
-  .filter((b) => b.status === 'pending')
-  .reduce((sum, b) => sum + Number(b.amount), 0);
 console.log(`\nVerification figures — these must match the new app after import:`);
-console.log(`  parties:        ${(data.parties || []).length}`);
-console.log(`  bills:          ${(data.bills || []).length}`);
-console.log(`  bank_txns:      ${(data.bank_txns || []).length}`);
-console.log(`  pending total:  ${pending}`);
+console.log(`  parties:               ${(data.parties || []).length}`);
+console.log(`  bills:                 ${(data.bills || []).length}  (matches the "Delete ALL N bill(s)" count on More)`);
+console.log(`  bank_txns:             ${(data.bank_txns || []).length}  (informational — no screen shows this count)`);
+console.log(`  To pay (pending):      ${fmtINR(toPay)}`);
+console.log(`  To receive (pending):  ${fmtINR(toReceive)}`);
+
+if (riskyCells.length) {
+  console.log(`\nCheck these cells after import — a spreadsheet may read a leading =, +, - or @ as a formula:`);
+  for (const r of riskyCells) {
+    console.log(`  ${r.tab}.csv, id ${r.id}, ${r.field}: ${r.value}`);
+  }
+}
