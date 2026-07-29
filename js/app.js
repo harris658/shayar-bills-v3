@@ -37,8 +37,11 @@
         // The token can still be locally valid (e.g. an allowlist
         // rejection) — clear it so getSession() stops reporting a session
         // that the server has already refused, and so a stale route change
-        // (hashchange) can't render data screens over it.
-        STB.auth.clear();
+        // (hashchange) can't render data screens over it. signOut() (not
+        // clear()) also disables auto-select, so a reload doesn't silently
+        // re-mint the same rejected identity and flash the app chrome
+        // before bouncing back to login.
+        STB.auth.signOut();
         STB.store.loaded = false;
         topbar.hidden = true;
         renderedRoute = null;
@@ -85,7 +88,8 @@
   STB.renderRoute = renderRoute;
 
   function configPlaceholderPending() {
-    const c = STB.config || {};
+    const c = STB.config;
+    if (!c) return true; // config.js failed to load entirely
     return String(c.APPS_SCRIPT_URL || '').indexOf('<PASTE') === 0
       || String(c.GOOGLE_CLIENT_ID || '').indexOf('<PASTE') === 0;
   }
@@ -105,16 +109,28 @@
     }
     const session = await STB.db.getSession();
     if (!session) {
+      // Only attempt a silent renewal when there is something to renew — a
+      // stored (if expired) token — and only once per boot cycle (a skewed
+      // device clock could otherwise hand back a credential valid() always
+      // rejects, looping forever). A brand-new visitor has no stored token,
+      // so this never runs and the sign-in button paints immediately with
+      // no 8s timer anywhere near it.
+      //
+      // Awaiting renew() fully (success or failure) before ever rendering
+      // the button, rather than racing the two, matters because
+      // google.accounts.id.initialize is a global singleton: rendering the
+      // button first and then calling renew() re-initializes it underneath
+      // an already-visible button and silently rewires its callback (see
+      // task-6 review round 2). Sequential ordering means the button's own
+      // callback is always the last one registered, so a tap always works
+      // regardless of when it happens.
+      if (!opts.skipRenew && !opts.renewed && STB.auth.get()) {
+        try { await STB.auth.renew(); } catch (e) { /* fall through to login below */ }
+        return STB.boot({ renewed: true });
+      }
       topbar.hidden = true;
       renderedRoute = null;
-      // Paint the sign-in button immediately rather than blocking first
-      // paint on renew()'s 8s prompt() timeout. A successful silent renewal
-      // upgrades straight past it. Skipped on the explicit sign-out path —
-      // the user just asked to leave.
       STB.screens.login.render(root, false);
-      if (!opts.skipRenew) {
-        STB.auth.renew().then(() => { STB.boot(); }).catch(() => {});
-      }
       return;
     }
     topbar.hidden = false;
