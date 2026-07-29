@@ -42,14 +42,14 @@ function fmtINR(n) {
 // would be worse than leaving a warning for a manual check.
 function findFormulaRisk(tab, headers, rows) {
   const risky = [];
-  for (const r of rows) {
+  rows.forEach((r, i) => {
     for (const h of headers) {
       const v = r[h];
       if (v === null || v === undefined) continue;
       const s = String(v);
-      if (/^[=+\-@]/.test(s)) risky.push({ tab, id: r.id, field: h, value: s });
+      if (/^[=+\-@]/.test(s)) risky.push({ tab, id: r.id, index: i, field: h, value: s });
     }
-  }
+  });
   return risky;
 }
 
@@ -101,23 +101,34 @@ for (const tab of Object.keys(HEADERS)) {
 }
 
 // This is the only gate before an unrepeatable import: refuse to produce
-// output the app cannot render back correctly. A non-numeric amount on a
-// pending bill would corrupt the exact figure Step 5 checks against.
-const badAmounts = [];
+// output the app cannot render back correctly. js/lib/ledger.js computes
+// monthPaid/monthReceived from every bill regardless of status, and
+// statement.js/matching.js do arithmetic on every bank txn — so a
+// non-numeric amount anywhere in either array, not just on pending bills,
+// would render as ₹NaN on a Dashboard tile after import. `Number(null)` is
+// `0` (same coercion ledger.js uses) and must keep passing, as must a
+// legitimately negative amount or a zero amount.
+const badBillAmounts = [];
+for (const b of data.bills || []) {
+  if (!Number.isFinite(Number(b.amount))) badBillAmounts.push(b.id);
+}
+const badTxnAmounts = [];
+for (const t of data.bank_txns || []) {
+  if (!Number.isFinite(Number(t.amount))) badTxnAmounts.push(t.id);
+}
+if (badBillAmounts.length || badTxnAmounts.length) {
+  console.error(`\nrefusing to write output — non-numeric amount(s) found:`);
+  if (badBillAmounts.length) console.error(`  bills: ${badBillAmounts.join(', ')}`);
+  if (badTxnAmounts.length) console.error(`  bank_txns: ${badTxnAmounts.join(', ')}`);
+  process.exit(1);
+}
+
 let toPay = 0;
 let toReceive = 0;
 for (const b of data.bills || []) {
   if (b.status !== 'pending') continue;
   const amt = Number(b.amount);
-  if (!Number.isFinite(amt)) {
-    badAmounts.push(b.id);
-    continue;
-  }
   if (b.type === 'paid') toPay += amt; else toReceive += amt;
-}
-if (badAmounts.length) {
-  console.error(`\nrefusing to write output — pending bill(s) with a non-numeric amount: ${badAmounts.join(', ')}`);
-  process.exit(1);
 }
 
 mkdirSync(outDir, { recursive: true });
@@ -140,6 +151,7 @@ console.log(`  To receive (pending):  ${fmtINR(toReceive)}`);
 if (riskyCells.length) {
   console.log(`\nCheck these cells after import — a spreadsheet may read a leading =, +, - or @ as a formula:`);
   for (const r of riskyCells) {
-    console.log(`  ${r.tab}.csv, id ${r.id}, ${r.field}: ${r.value}`);
+    const label = r.id !== undefined && r.id !== null ? `id ${r.id}` : `row ${r.index} (no id)`;
+    console.log(`  ${r.tab}.csv, ${label}, ${r.field}: ${r.value}`);
   }
 }
