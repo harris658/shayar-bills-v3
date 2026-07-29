@@ -1,81 +1,82 @@
 (function () {
   'use strict';
   globalThis.STB = globalThis.STB || {};
-  const client = supabase.createClient(STB.config.SUPABASE_URL, STB.config.SUPABASE_ANON_KEY);
+
+  // Read lazily so tests can swap fetch between cases.
+  function doFetch(url, opts) {
+    return ((STB.env && STB.env.fetch) || globalThis.fetch)(url, opts);
+  }
+
+  function sleep(ms) {
+    return new Promise((r) => setTimeout(r, ms));
+  }
+
+  /**
+   * One POST to the Apps Script web app.
+   *
+   * text/plain is required, not incidental: Apps Script does not answer CORS
+   * preflight OPTIONS, and text/plain is one of the three types a browser may
+   * send without preflighting.
+   *
+   * Apps Script cannot set meaningful status codes, so every response is a 200
+   * carrying {ok, data} or {ok, error}. Throwing on ok:false keeps the existing
+   * try/catch in every screen working unchanged.
+   */
+  async function rpc(action, args) {
+    const token = await STB.auth.ensureFresh();
+
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const res = await doFetch(STB.config.APPS_SCRIPT_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify({ action: action, args: args || {}, idToken: token })
+      });
+      const out = await res.json();
+      if (out.ok) return out.data;
+      // Another user holds the write lock — one retry, then give up.
+      if (out.error === 'busy' && attempt === 0) {
+        await sleep(600);
+        continue;
+      }
+      throw new Error(out.error || 'request failed');
+    }
+  }
 
   STB.db = {
-    client,
-    async signIn(email, password) {
-      const { data, error } = await client.auth.signInWithPassword({ email, password });
-      if (error) throw error;
-      return data.session;
+    rpc: rpc,
+
+    // --- session (client-local; no network) ---
+    signIn(el) { return STB.auth.renderButton(el); },
+    signOut() { STB.auth.signOut(); },
+    async getSession() { return STB.auth.session(); },
+
+    // --- reads ---
+    snapshot() { return rpc('snapshot'); },
+    listParties() { return rpc('listParties'); },
+    listBills() { return rpc('listBills'); },
+    listBankTxns() { return rpc('listBankTxns'); },
+
+    // --- writes ---
+    createParty(name) { return rpc('createParty', { name: name }); },
+    createBill(bill) { return rpc('createBill', { bill: bill }); },
+    markPaid(id, opts) {
+      return rpc('markPaid', {
+        id: id,
+        payment_ref: (opts && opts.payment_ref) || '',
+        payment_date: (opts && opts.payment_date) || ''
+      });
     },
-    async signOut() { await client.auth.signOut(); },
-    async getSession() {
-      const { data } = await client.auth.getSession();
-      return data.session || null;
-    },
-    async listParties() {
-      const { data, error } = await client.from('parties').select('*').order('name');
-      if (error) throw error;
-      return data;
-    },
-    async createParty(name) {
-      const { data, error } = await client.from('parties')
-        .insert({ name: name.trim() }).select().single();
-      if (error) throw error;
-      return data;
-    },
-    async listBills() {
-      const { data, error } = await client.from('bills').select('*')
-        .order('bill_date', { ascending: false })
-        .order('created_at', { ascending: false });
-      if (error) throw error;
-      return data;
-    },
-    async createBill(bill) {
-      const { data, error } = await client.from('bills').insert(bill).select().single();
-      if (error) throw error;
-      return data;
-    },
-    async markPaid(id, { payment_ref, payment_date }) {
-      const { error } = await client.from('bills')
-        .update({ status: 'paid', payment_ref: payment_ref || '', payment_date })
-        .eq('id', id);
-      if (error) throw error;
-    },
-    async deleteBill(id) {
-      const { error } = await client.from('bills').delete().eq('id', id);
-      if (error) throw error;
-    },
-    // Wipes bills AND imported bank txns (txns reference bills and, kept
-    // alone, would dedupe-block re-importing old statements). Parties stay.
-    async deleteAllBills() {
-      const NIL = '00000000-0000-0000-0000-000000000000';
-      let r = await client.from('bank_txns').delete().neq('id', NIL);
-      if (r.error) throw r.error;
-      r = await client.from('bills').delete().neq('id', NIL);
-      if (r.error) throw r.error;
-    },
-    async listBankTxns() {
-      const { data, error } = await client.from('bank_txns').select('*');
-      if (error) throw error;
-      return data;
-    },
-    async applyImport({ matches, unmatchedTxns }) {
-      for (const m of matches) {
-        const { error } = await client.from('bank_txns')
-          .insert({ ...m.txn, matched_bill_id: m.bill_id });
-        if (error) throw error;
-        await this.markPaid(m.bill_id, {
-          payment_ref: m.txn.ref, payment_date: m.txn.txn_date
-        });
-      }
-      if (unmatchedTxns.length) {
-        const { error } = await client.from('bank_txns')
-          .insert(unmatchedTxns.map((t) => ({ ...t, matched_bill_id: null })));
-        if (error) throw error;
-      }
+    deleteBill(id) { return rpc('deleteBill', { id: id }); },
+
+    // Wipes bills AND imported bank txns. The txns reference bills and, kept
+    // alone, would dedupe-block re-importing old statements. Parties stay.
+    deleteAllBills() { return rpc('deleteAllBills'); },
+
+    applyImport(payload) {
+      return rpc('applyImport', {
+        matches: payload.matches || [],
+        unmatchedTxns: payload.unmatchedTxns || []
+      });
     }
   };
 })();
