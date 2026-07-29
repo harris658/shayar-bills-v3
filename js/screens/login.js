@@ -4,31 +4,20 @@
   STB.screens = STB.screens || {};
 
   STB.screens.login = {
-    render(root) {
+    render(root, expired) {
       root.innerHTML = `
-        <div class="card" style="max-width:380px;margin:60px auto">
+        <div class="card" style="max-width:380px;margin:60px auto;text-align:center">
           <h2 style="margin-top:0">Shayar Tex — Bills</h2>
-          <label>Email <input id="l-email" type="email" autocomplete="username"></label>
-          <label>Password <input id="l-pass" type="password" autocomplete="current-password"></label>
+          <p class="hint" id="l-msg">${expired
+            ? 'Session expired — sign in again to continue.'
+            : 'Sign in with your Google account.'}</p>
+          <div id="l-btn" style="display:flex;justify-content:center;margin:16px 0"></div>
           <p class="hint" id="l-err"></p>
-          <button class="btn" id="l-btn" style="width:100%">Sign in</button>
         </div>`;
-      const email = root.querySelector('#l-email');
-      const pass = root.querySelector('#l-pass');
       const err = root.querySelector('#l-err');
-      const go = async () => {
-        err.textContent = '';
-        try {
-          await STB.db.signIn(email.value.trim(), pass.value);
-          location.hash = '#/dashboard';
-          STB.boot();
-        } catch (e) {
-          err.textContent = 'Sign-in failed: ' + (e.message || e);
-        }
-      };
-      root.querySelector('#l-btn').addEventListener('click', go);
-      pass.addEventListener('keydown', (e) => { if (e.key === 'Enter') go(); });
-      email.focus();
+      STB.db.signIn(root.querySelector('#l-btn'))
+        .then(() => { location.hash = '#/dashboard'; STB.boot(); })
+        .catch((e) => { err.textContent = 'Sign-in failed: ' + (e.message || e); });
     }
   };
 })();

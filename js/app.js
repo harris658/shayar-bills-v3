@@ -19,13 +19,20 @@
 
   STB.refresh = async function () {
     try {
-      const [parties, bills] = await Promise.all([STB.db.listParties(), STB.db.listBills()]);
+      const { parties, bills } = await STB.db.snapshot();
       STB.store.parties = parties;
       STB.store.bills = bills;
       STB.store.loaded = true;
       STB.renderRoute();
     } catch (e) {
       console.error('refresh failed', e);
+      // A dead session must land on the sign-in screen, not a toast that
+      // leaves a stale ledger on screen looking live.
+      if (/session expired|not signed in|not authorised/i.test(e.message || '')) {
+        topbar.hidden = true;
+        STB.screens.login.render(root, true);
+        return;
+      }
       STB.toast('Could not refresh data — check connection');
     }
   };
@@ -69,8 +76,14 @@
     const session = await STB.db.getSession();
     if (!session) {
       topbar.hidden = true;
-      STB.screens.login.render(root);
-      return;
+      // Try a silent renew before making anyone tap. Fails quietly with
+      // multiple Google accounts or blocked third-party cookies.
+      try {
+        await STB.auth.renew();
+      } catch (e) {
+        STB.screens.login.render(root, false);
+        return;
+      }
     }
     topbar.hidden = false;
     if (!location.hash || location.hash === '#/') location.hash = '#/dashboard';
