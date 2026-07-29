@@ -42,3 +42,14 @@ Copy the `/exec` URL into `js/config.js` as `APPS_SCRIPT_URL`.
 **After every code change, use Deploy → Manage deployments → edit → New
 version.** Creating a *new deployment* mints a different URL and the app will
 keep talking to the old code.
+
+## Nightly backups
+
+`Backup.gs` copies the whole spreadsheet to a `Bills Backups` folder in Drive
+each night around 2am and trashes copies beyond the newest 30.
+
+Run `installBackupTrigger` once by hand from the editor after the first
+deploy. It is safe to re-run — it removes its own duplicate triggers first.
+
+Verify it worked: Triggers (the clock icon in the left rail) should list one
+time-driven `nightlyBackup`. Check the Drive folder the next morning.
