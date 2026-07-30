@@ -1,0 +1,66 @@
+<!--
+  Local verification harness — NOT the app. index.html is.
+
+  Loads the real app modules but replaces Google sign-in and the Apps Script
+  backend with harness-stub.js: an in-memory ledger of fake bills answering on a
+  deliberate 2000ms delay (the measured Apps Script floor). It cannot reach the
+  live Sheet, holds no credentials, and shows no real data — so it is harmless
+  even though GitHub Pages serves it.
+
+  Exists because the perceived-latency work (offline cache, focus staleness
+  gate, optimistic writes) is only observable against a slow backend, and the
+  real one cannot be driven from localhost — the OAuth origin is the Pages
+  domain. Drive it with scripts/verify-perf.mjs.
+-->
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Bills — perf harness</title>
+  <link rel="stylesheet" href="css/app.css">
+  <style>
+    #hz { position: fixed; bottom: 0; left: 0; right: 0; background: #111; color: #0f0;
+          font: 12px/1.5 ui-monospace, monospace; padding: 8px; max-height: 34vh; overflow: auto;
+          z-index: 9999; pointer-events: none; }
+    #hz b { color: #ff0; }
+  </style>
+</head>
+<body>
+  <header class="topbar" id="topbar" hidden>
+    <div class="brand">Shayar&nbsp;Tex</div>
+    <nav class="nav" id="main-nav">
+      <a href="#/dashboard" data-nav="dashboard">Dashboard</a>
+      <a href="#/new" data-nav="new">New Bill</a>
+      <a href="#/bills" data-nav="bills">Bills</a>
+      <a href="#/parties" data-nav="parties">Parties</a>
+      <a href="#/import" data-nav="import">Import</a>
+      <a href="#/more" data-nav="more">More</a>
+    </nav>
+    <button class="btn ghost" id="signout-btn">Sign out</button>
+  </header>
+  <main id="screen-root"></main>
+  <div id="toast" class="toast" hidden></div>
+  <input type="file" id="v2-file-input" accept=".json" hidden>
+  <div id="hz">harness booting…</div>
+
+  <script src="js/config.js"></script>
+  <script src="js/lib/util.js"></script>
+  <script src="js/lib/ledger.js"></script>
+  <script src="js/lib/statement.js"></script>
+  <script src="js/lib/matching.js"></script>
+  <script src="js/lib/auth.js"></script>
+  <script src="js/lib/cache.js"></script>
+  <script src="js/lib/db.js"></script>
+  <script src="harness-stub.js"></script>
+  <script src="js/screens/login.js"></script>
+  <script src="js/screens/entry.js"></script>
+  <script src="js/screens/bills.js"></script>
+  <script src="js/screens/dashboard.js"></script>
+  <script src="js/screens/party.js"></script>
+  <script src="js/screens/import.js"></script>
+  <script src="js/screens/print.js"></script>
+  <script src="js/screens/more.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>

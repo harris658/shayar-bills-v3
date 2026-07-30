@@ -18,7 +18,25 @@ node --test
 ```
 
 (run from the app root — `node --test tests/` does not work on this machine's
-Node version)
+Node version. `node --test "tests/*.test.mjs"` also works.)
+
+### Browser harness — perceived latency
+
+`node --test` covers the pure modules; it cannot see the offline cache, the
+focus staleness gate, or the optimistic writes, because those are DOM and
+timing behaviour. `harness.html` loads the real app against a stubbed backend
+that answers on a 2000ms delay (the measured Apps Script floor) — the real
+backend cannot be driven from localhost, since the OAuth origin is the Pages
+domain.
+
+```bash
+python3 -m http.server 8791          # from the app root
+node scripts/verify-perf.mjs         # needs playwright on the path
+```
+
+33 assertions: cache round trip and user scoping, warm-reload paint time,
+focus gate on fresh vs. >60s-old data, and every optimistic write plus its
+rollback (markPaid, deleteBill, createBill).
 
 ## Backend
 

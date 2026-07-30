@@ -17,6 +17,46 @@
   STB.store = { parties: [], bills: [], loaded: false };
   STB.partyById = (id) => STB.store.parties.find((p) => p.id === id);
 
+  // Id prefix for a bill shown optimistically but not yet acknowledged by the
+  // server. The real id is a server-minted UUID, so this can never collide.
+  // Screens must refuse server actions on these rows — the row does not exist
+  // in the Sheet yet, and markPaid/deleteBill would fail with 'bill not found'.
+  const PENDING_PREFIX = 'pending:';
+  STB.pendingId = () => PENDING_PREFIX + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
+  STB.isPending = (id) => String(id).indexOf(PENDING_PREFIX) === 0;
+
+  // When the store was last known to match the server — a successful snapshot,
+  // or the timestamp the restored cache was written at.
+  let snapshotAt = 0;
+
+  // How old the store must be before a window focus is worth 2.5s of freeze.
+  const STALE_MS = 60000;
+
+  function signedInEmail() {
+    const s = STB.auth.session();
+    return s ? s.email : '';
+  }
+
+  /**
+   * Writes the current store to the offline cache. Called after every
+   * successful snapshot and after every local (optimistic) mutation, so a
+   * reload never shows a ledger older than what was last on screen.
+   */
+  STB.persistStore = function () {
+    if (STB.store.loaded) {
+      STB.cache.write(signedInEmail(), STB.store.parties, STB.store.bills);
+    }
+  };
+
+  /**
+   * Persist + re-render. Call after any local mutation (an optimistic write or
+   * its rollback) so the screen and the cache never disagree.
+   */
+  STB.commitStore = function () {
+    STB.persistStore();
+    renderRoute();
+  };
+
   // Matches every hard auth failure the Apps Script server throws (see
   // apps-script/Auth.gs): a missing/expired token, a token minted for a
   // different client, an unverified email, and an allowlist rejection.
@@ -28,6 +68,8 @@
       STB.store.parties = parties;
       STB.store.bills = bills;
       STB.store.loaded = true;
+      snapshotAt = Date.now();
+      STB.persistStore();
       STB.renderRoute();
     } catch (e) {
       console.error('refresh failed', e);
@@ -43,7 +85,12 @@
         // before bouncing back to login. Routed through STB.db, matching
         // every other call site in this file.
         STB.db.signOut();
+        // The server refused this identity (expired, revoked, or dropped from
+        // allowed_users) — drop the cached ledger with the token rather than
+        // leaving it to paint for whoever signs in next on this device.
+        STB.cache.clear();
         STB.store.loaded = false;
+        snapshotAt = 0;
         topbar.hidden = true;
         renderedRoute = null;
         STB.screens.login.render(root, e.message || true);
@@ -53,8 +100,14 @@
     }
   };
 
+  // Alt-tabbing back used to cost a full `snapshot` (~2.5s of frozen UI) every
+  // single time, because Apps Script's per-request floor is ~1.5s no matter how
+  // little it reads. This is a two-person ledger, so data more recent than a
+  // minute is almost certainly still current; refresh only past that.
   window.addEventListener('focus', () => {
-    if (!topbar.hidden) STB.refresh();
+    if (topbar.hidden) return;
+    if (Date.now() - snapshotAt < STALE_MS) return;
+    STB.refresh();
   });
 
   STB.nav = function (hash) { location.hash = hash; };
@@ -150,6 +203,17 @@
     }
     topbar.hidden = false;
     if (!location.hash || location.hash === '#/') location.hash = '#/dashboard';
+    // Paint the last known ledger before touching the network. `snapshot`
+    // takes ~2.5s to answer and rendering zeros for that long looks exactly
+    // like an empty ledger. STB.refresh() below replaces this with the
+    // server's copy as soon as it lands.
+    const cached = STB.cache.read(session.email);
+    if (cached) {
+      STB.store.parties = cached.parties;
+      STB.store.bills = cached.bills;
+      STB.store.loaded = true;
+      snapshotAt = cached.at;
+    }
     renderRoute();
     STB.refresh();
   };
@@ -160,6 +224,9 @@
 
   document.getElementById('signout-btn').addEventListener('click', async () => {
     await STB.db.signOut();
+    STB.cache.clear();
+    STB.store = { parties: [], bills: [], loaded: false };
+    snapshotAt = 0;
     location.hash = '';
     STB.boot({ skipRenew: true });
   });

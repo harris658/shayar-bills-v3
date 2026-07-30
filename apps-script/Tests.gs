@@ -70,7 +70,11 @@ function runTests() {
       'bill_date is stored as a string, got ' + typeof dateCell.getValue() +
       ' (' + dateCell.getValue() + ')');
 
-    // --- markPaid's payment_date takes the same route through setCells_
+    // --- markPaid writes through setCellsBatch_, which round-trips a whole
+    // range: it reads status..payment_date, patches in memory, and writes the
+    // block back. The '@' format has to be re-forced inside that span or
+    // payment_date lands as a date serial again, and any column swept into a
+    // widened span gets rewritten with whatever getValues() handed back.
     markPaid_(bill.id, '00' + stamp, '2026-03-01');
     const payCell = bT.sheet.getRange(bRow, bT.index.payment_date + 1);
     assert_(typeof payCell.getValue() === 'string',
@@ -78,6 +82,19 @@ function runTests() {
     const refCell = bT.sheet.getRange(bRow, bT.index.payment_ref + 1);
     assert_(refCell.getValue() === '00' + stamp,
       'zero-padded payment_ref keeps its leading zeros, got ' + refCell.getValue());
+
+    const payFormat = bT.sheet.getRange(bRow, bT.index.payment_date + 1);
+    assert_(payFormat.getNumberFormat() === '@',
+      'payment_date cell is plain text after the batched write, got format ' +
+      payFormat.getNumberFormat());
+
+    // --- fields markPaid does NOT patch must survive its range round trip
+    const afterPaid = readAll_('bills').filter(function (b) { return b.id === bill.id; })[0];
+    assert_(afterPaid.bill_date === '2026-01-31',
+      'markPaid leaves bill_date alone, got ' + afterPaid.bill_date);
+    assert_(afterPaid.amount_expr === '1200+34.5',
+      'markPaid leaves amount_expr alone, got ' + afterPaid.amount_expr);
+    assert_(afterPaid.note === 'test', 'markPaid leaves note alone, got ' + afterPaid.note);
 
     // --- amount must stay numeric — the text guard must not overreach
     assert_(typeof bT.sheet.getRange(bRow, bT.index.amount + 1).getValue() === 'number',

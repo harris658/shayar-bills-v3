@@ -131,24 +131,73 @@
         try {
           let p = exact();
           if (!p) {
+            // Deliberately NOT optimistic. The bill row needs the server's
+            // party id, and a temporary one would have to be threaded through
+            // the bill and fixed up on both after acknowledgement — two
+            // reconciliations racing each other. Saving against an existing
+            // party is the common path and is fully optimistic below; typing a
+            // brand-new party name still costs one round trip (~2.7s).
             p = await STB.db.createParty(name);
             STB.store.parties.push(p);
+            STB.store.parties.sort((a, b) => a.name.localeCompare(b.name));
           }
           const bill = {
             party_id: p.id, type, amount: amt,
             bill_date: date.value || U$.todayStr(), note: note.value.trim()
           };
           if (amount_expr) bill.amount_expr = amount_expr;
-          await STB.db.createBill(bill);
-          STB.toast('Bill saved ✓');
+
+          // Show the bill immediately and reconcile behind it. Awaiting
+          // createBill (~2.3s) and then a snapshot (~2.5s) put ~5s between the
+          // click and the bills list; neither wait tells the user anything the
+          // provisional row doesn't. The provisional row mirrors exactly what
+          // createBill_ writes server-side (see apps-script/Code.gs) so the
+          // swap below is invisible.
+          const provisional = Object.assign({
+            id: STB.pendingId(),
+            status: 'pending',
+            payment_ref: '',
+            payment_date: '',
+            created_at: new Date().toISOString()
+          }, bill);
+          // Newest first, matching listBills_'s bill_date/created_at ordering
+          // for a bill dated today. The next snapshot re-sorts properly.
+          STB.store.bills.unshift(provisional);
+
+          STB.db.createBill(bill).then((row) => {
+            const i = STB.store.bills.indexOf(provisional);
+            // A background refresh may have replaced the array already — the
+            // write landed, so the server's own row is on screen and there is
+            // nothing left to swap.
+            if (i >= 0) {
+              STB.store.bills[i] = row;
+              STB.commitStore();
+            }
+            STB.toast('Bill saved ✓');
+          }).catch((err) => {
+            console.error('createBill failed', err);
+            const i = STB.store.bills.indexOf(provisional);
+            if (i >= 0) {
+              STB.store.bills.splice(i, 1);
+              STB.commitStore();
+            }
+            STB.toast('Could not save — the bill was NOT recorded');
+          });
+
           if (addAnother) {
             party.value = ''; amount.value = ''; note.value = '';
             preview.innerHTML = '&nbsp;';
-            STB.refresh();           // background; form keeps focus
+            // persistStore, NOT commitStore: renderRoute() only spares the
+            // entry form while an INPUT inside it holds focus, and a click on
+            // "Save & add another" leaves focus on the button — the form would
+            // be rebuilt and `party` below would be a detached node, so the
+            // focus call would silently go nowhere. This screen shows no bill
+            // list, so there is nothing to re-render for anyway.
+            STB.persistStore();
             party.focus();
           } else {
-            await STB.refresh();
-            STB.nav('#/bills');
+            STB.persistStore();
+            STB.nav('#/bills');   // hashchange renders the list, provisional row included
           }
         } catch (e) {
           console.error('save failed', e);

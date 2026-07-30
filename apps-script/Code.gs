@@ -108,15 +108,25 @@ function createBill_(bill, user) {
   return row;
 }
 
+/**
+ * setCellsBatch_ rather than setCells_ deliberately: setCells_ costs one
+ * setValue round trip per field, and at three fields that made markPaid the
+ * slowest action in the app (~3.2s) — all of it inside the held lock, so it
+ * also blocks the other user for that long. status/payment_ref/payment_date are
+ * adjacent columns, so the batch collapses them into a single range write.
+ */
 function markPaid_(id, paymentRef, paymentDate) {
   const t = table_('bills');
   const rowNum = findRow_(t, id);
   if (rowNum < 0) throw new Error('bill not found');
-  setCells_(t, rowNum, {
-    status: 'paid',
-    payment_ref: String(paymentRef || ''),
-    payment_date: paymentDate ? isoDate_(paymentDate) : ''
-  });
+  setCellsBatch_(t, [{
+    rowNum: rowNum,
+    patch: {
+      status: 'paid',
+      payment_ref: String(paymentRef || ''),
+      payment_date: paymentDate ? isoDate_(paymentDate) : ''
+    }
+  }]);
   return { ok: true };
 }
 

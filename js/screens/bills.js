@@ -94,42 +94,65 @@
         else selected.delete(e.target.dataset.id);
       }));
 
-      root.querySelectorAll('.mark-paid').forEach((btn) => btn.addEventListener('click', async () => {
-        if (btn.disabled) return;
+      // Both handlers below update the store first and send the request
+      // behind it, rolling back on failure. Waiting for Apps Script instead
+      // costs ~3.2s (markPaid) or ~2.3s (deleteBill) of dead UI before the row
+      // visibly changes, and the local mutation mirrors exactly what the
+      // server writes (see markPaid_/deleteBill_ in apps-script/Code.gs), so
+      // the follow-up snapshot that used to be required is now redundant.
+      root.querySelectorAll('.mark-paid').forEach((btn) => btn.addEventListener('click', () => {
+        const id = btn.dataset.id;
+        // A provisional row has no Sheet row yet — the server would answer
+        // 'bill not found' and the rollback would undo a paid state the user
+        // just watched appear.
+        if (STB.isPending(id)) { STB.toast('Still saving — try again in a moment'); return; }
+        const b = STB.store.bills.find((x) => x.id === id);
+        if (!b) { STB.toast('Bill no longer exists'); return; }
         const ref = prompt('Bank ref number (leave empty for cash/none):');
         if (ref === null) return;
-        btn.disabled = true;
-        try {
-          await STB.db.markPaid(btn.dataset.id, {
-            payment_ref: ref.trim(), payment_date: STB.util.todayStr()
-          });
-          STB.toast('Marked paid ✓');
-          STB.refresh();
-        } catch (e) {
+
+        const before = { status: b.status, payment_ref: b.payment_ref, payment_date: b.payment_date };
+        const after = { status: 'paid', payment_ref: ref.trim(), payment_date: STB.util.todayStr() };
+        Object.assign(b, after);
+        STB.toast('Marked paid ✓');
+        STB.commitStore();
+
+        STB.db.markPaid(id, after).catch((e) => {
           console.error('markPaid failed', e);
-          STB.toast('Could not mark paid — check connection');
-        } finally {
-          btn.disabled = false;
-        }
+          // Re-find rather than reusing `b`: a background refresh may have
+          // replaced the array, leaving `b` an orphan whose mutation nothing
+          // would render.
+          const cur = STB.store.bills.find((x) => x.id === id);
+          if (cur) Object.assign(cur, before);
+          STB.toast('Could not mark paid — reverted to pending');
+          STB.commitStore();
+        });
       }));
 
-      root.querySelectorAll('.del').forEach((btn) => btn.addEventListener('click', async () => {
-        if (btn.disabled) return;
-        const b = STB.store.bills.find((x) => x.id === btn.dataset.id);
-        if (!b) { STB.toast('Bill no longer exists'); return; }
+      root.querySelectorAll('.del').forEach((btn) => btn.addEventListener('click', () => {
+        const id = btn.dataset.id;
+        if (STB.isPending(id)) { STB.toast('Still saving — try again in a moment'); return; }
+        const i = STB.store.bills.findIndex((x) => x.id === id);
+        if (i < 0) { STB.toast('Bill no longer exists'); return; }
+        const b = STB.store.bills[i];
         const p = STB.partyById(b.party_id);
         if (!confirm(`Delete bill — ${p ? p.name : '?'}, ${STB.util.money(b.amount)}?`)) return;
-        btn.disabled = true;
-        try {
-          await STB.db.deleteBill(btn.dataset.id);
-          STB.toast('Bill deleted');
-          STB.refresh();
-        } catch (e) {
+
+        STB.store.bills.splice(i, 1);
+        selected.delete(id);
+        STB.toast('Bill deleted');
+        STB.commitStore();
+
+        STB.db.deleteBill(id).catch((e) => {
           console.error('deleteBill failed', e);
-          STB.toast('Could not delete — check connection');
-        } finally {
-          btn.disabled = false;
-        }
+          // Only restore into the array the row was removed from; if a refresh
+          // swapped it out, the server's copy is authoritative either way.
+          if (!STB.store.bills.some((x) => x.id === id)) {
+            STB.store.bills.splice(Math.min(i, STB.store.bills.length), 0, b);
+          }
+          STB.toast('Could not delete — the bill is still there');
+          STB.commitStore();
+        });
       }));
 
       root.querySelector('#print-sel').addEventListener('click', () => {
