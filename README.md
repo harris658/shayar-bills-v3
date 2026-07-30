@@ -50,10 +50,14 @@ write any output rather than emit data the Sheet can't render cleanly.
 https://harris658.github.io/shayar-bills-v3/
 
 Login works once `js/config.js` carries the real `APPS_SCRIPT_URL` and
-`GOOGLE_CLIENT_ID`, and the Apps Script project's own `GOOGLE_CLIENT_ID`
-script property is set to that same value — a mismatch between the two is
-the most likely first-setup failure, and it surfaces as `token not for this
-app`.
+`GOOGLE_CLIENT_ID`, and `clientId_()` in `apps-script/Auth.gs` returns that
+same client ID. It is a hardcoded literal, not a script property — the Apps
+Script REST API cannot set script properties from outside the editor, so
+hardcoding it keeps the deploy fully scriptable. A mismatch between the two
+is the most likely first-setup failure, and it surfaces as `token not for
+this app`.
+
+Both values are already filled in and verified live as of 2026-07-30.
 
 ## Known limitation: mid-session auth failures are briefly misleading
 
