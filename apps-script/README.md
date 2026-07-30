@@ -54,8 +54,34 @@ it's maintained by hand, one row per person, `active` set to `TRUE`/`FALSE`.
 It's also the one tab allowed to have no `id` column (`table_()` in
 `Sheets.gs` special-cases it).
 
-**Columns that must be formatted as plain text** (select the column → Format
-→ Number → Plain text, before any data goes in):
+### Spreadsheet timezone
+
+File → Settings → Time zone must be **(GMT+5:30) India Standard Time**.
+
+A hand-created Sheet inherits the creator's timezone, so this is usually right
+by accident. A Sheet created through the API defaults to `Etc/GMT`, which is
+wrong twice over: `Utilities.formatDate` rejects `Etc/GMT` outright, so
+`isoDate_` throws `Invalid argument: timeZone` the moment it meets a real Date
+cell; and `nightlyBackup` stamps its filename from the spreadsheet timezone, so
+a 2am IST run would be dated the previous day. Verify with:
+
+```
+gws sheets spreadsheets get --params '{"spreadsheetId":"<id>","fields":"properties(timeZone)"}'
+```
+
+Google stores it as the equivalent `Asia/Calcutta`; that is the same zone as
+`Asia/Kolkata`, not a mistake.
+
+### Plain-text columns
+
+**`Sheets.gs` enforces this in code** — `TEXT_FIELDS_` and `forceTextCols_`
+re-apply plain text on every write, because `appendRow`/`setValues` otherwise
+stamp their own inferred format over the column's. Formatting the columns by
+hand is still worth doing (it keeps anything typed directly into the Sheet
+consistent), but the code no longer depends on it.
+
+Columns that must be plain text (select the column → Format → Number → Plain
+text, before any data goes in):
 
 - `bills!E` (bill_date), `bills!J` (payment_date), `bank_txns!B` (txn_date) —
   otherwise Sheets can silently reinterpret a date near midnight and evening

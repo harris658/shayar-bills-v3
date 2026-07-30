@@ -76,11 +76,13 @@ function objToRow_(t, obj) {
  * (`created_at`, with its `Z`) and amounts are left alone deliberately;
  * amounts must stay numeric.
  */
-const TEXT_FIELDS_ = ['bill_date', 'payment_date', 'txn_date', 'ref', 'payment_ref'];
+function textFields_() {
+  return ['bill_date', 'payment_date', 'txn_date', 'ref', 'payment_ref'];
+}
 
-/** Forces plain text on every TEXT_FIELDS_ column across `rowCount` rows from `startRow`. */
+/** Forces plain text on every textFields_() column across `rowCount` rows from `startRow`. */
 function forceTextCols_(t, startRow, rowCount) {
-  TEXT_FIELDS_.forEach(function (f) {
+  textFields_().forEach(function (f) {
     const c = t.index[f];
     if (c === undefined) return;
     t.sheet.getRange(startRow, c + 1, rowCount, 1).setNumberFormat('@');
@@ -109,8 +111,8 @@ function setCells_(t, rowNum, patch) {
   Object.keys(patch).forEach(function (k) {
     if (t.index[k] === undefined) return;
     const cell = t.sheet.getRange(rowNum, t.index[k] + 1);
-    // setValue re-infers type just like appendRow — see TEXT_FIELDS_.
-    if (TEXT_FIELDS_.indexOf(k) >= 0) cell.setNumberFormat('@');
+    // setValue re-infers type just like appendRow — see textFields_().
+    if (textFields_().indexOf(k) >= 0) cell.setNumberFormat('@');
     cell.setValue(patch[k]);
   });
 }
@@ -166,10 +168,10 @@ function setCellsBatch_(t, patches) {
         if (t.index[k] !== undefined) rowValues[t.index[k] - minCol] = merged[r].patch[k];
       });
     }
-    // setValues re-infers type — force '@' on any TEXT_FIELDS_ column inside
+    // setValues re-infers type — force '@' on any textFields_() column inside
     // this span before writing. payment_date/payment_ref reach this path when
     // applyImport_ marks a statement's worth of bills paid in one batch.
-    TEXT_FIELDS_.forEach(function (f) {
+    textFields_().forEach(function (f) {
       const c = t.index[f];
       if (c === undefined || c < minCol || c > maxCol) return;
       t.sheet.getRange(startRow, c + 1, rowCount, 1).setNumberFormat('@');

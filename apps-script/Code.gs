@@ -237,7 +237,7 @@ function applyImport_(matches, unmatchedTxns) {
 
   if (newRows.length) {
     const startRow = txT.sheet.getLastRow() + 1;
-    // Force plain text on ref AND txn_date before writing — see TEXT_FIELDS_
+    // Force plain text on ref AND txn_date before writing — see textFields_()
     // in Sheets.gs. A digits-only ref (e.g. "007123456") would otherwise be
     // stored as a number, and String()-ing it back on the next import no
     // longer equals the incoming ref: txnKey_ silently stops matching and the
