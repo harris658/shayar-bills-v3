@@ -52,6 +52,37 @@ function runTests() {
       'amount round-trips as a number, got ' + typeof readBack.amount + ' ' + readBack.amount);
     assert_(readBack.created_by === user.email, 'created_by records the signed-in email');
 
+    // --- bill_date is stored as TEXT, not as a coerced date serial.
+    // readAll_ runs every date field through isoDate_, which formats a Date
+    // back into yyyy-mm-dd — so the round-trip assertion above passes even
+    // when the cell holds a date serial. That masked a real bug: appendRow
+    // and setValues re-infer type and stamp their own format over the
+    // column's, so the value became 46233 wearing a yyyy-mm-dd mask, one
+    // timezone shift away from reading as the previous day. Assert the stored
+    // type directly, which is the only way to see it.
+    const bT = table_('bills');
+    const bRow = findRow_(bT, bill.id);
+    assert_(bRow > 0, 'created bill row is locatable for the format check');
+    const dateCell = bT.sheet.getRange(bRow, bT.index.bill_date + 1);
+    assert_(dateCell.getNumberFormat() === '@',
+      'bill_date cell is plain text, got format ' + dateCell.getNumberFormat());
+    assert_(typeof dateCell.getValue() === 'string',
+      'bill_date is stored as a string, got ' + typeof dateCell.getValue() +
+      ' (' + dateCell.getValue() + ')');
+
+    // --- markPaid's payment_date takes the same route through setCells_
+    markPaid_(bill.id, '00' + stamp, '2026-03-01');
+    const payCell = bT.sheet.getRange(bRow, bT.index.payment_date + 1);
+    assert_(typeof payCell.getValue() === 'string',
+      'payment_date is stored as a string, got ' + typeof payCell.getValue());
+    const refCell = bT.sheet.getRange(bRow, bT.index.payment_ref + 1);
+    assert_(refCell.getValue() === '00' + stamp,
+      'zero-padded payment_ref keeps its leading zeros, got ' + refCell.getValue());
+
+    // --- amount must stay numeric — the text guard must not overreach
+    assert_(typeof bT.sheet.getRange(bRow, bT.index.amount + 1).getValue() === 'number',
+      'amount is still stored as a number');
+
     // --- amount validation
     threw = false;
     errMsg = '';

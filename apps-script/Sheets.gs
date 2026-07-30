@@ -59,6 +59,43 @@ function objToRow_(t, obj) {
   });
 }
 
+/**
+ * Fields Sheets must never type-coerce.
+ *
+ * Formatting these columns as plain text in the spreadsheet is NOT enough:
+ * `appendRow` and `setValues` re-infer the type of what they write and stamp
+ * their own format over the column's, so a `yyyy-mm-dd` string lands as a date
+ * serial (46233) wearing a `yyyy-mm-dd` mask — it reads back correctly right
+ * up until a timezone shifts it a day, and `isoDate_` cannot tell the
+ * difference. A digits-only `ref` is worse: it becomes a number, drops its
+ * leading zeros, and silently breaks the import dedupe that replaced
+ * Postgres's unique constraint.
+ *
+ * Every write path therefore forces '@' on these columns immediately before
+ * writing. Bare dates and refs are the only values at risk — ISO timestamps
+ * (`created_at`, with its `Z`) and amounts are left alone deliberately;
+ * amounts must stay numeric.
+ */
+const TEXT_FIELDS_ = ['bill_date', 'payment_date', 'txn_date', 'ref', 'payment_ref'];
+
+/** Forces plain text on every TEXT_FIELDS_ column across `rowCount` rows from `startRow`. */
+function forceTextCols_(t, startRow, rowCount) {
+  TEXT_FIELDS_.forEach(function (f) {
+    const c = t.index[f];
+    if (c === undefined) return;
+    t.sheet.getRange(startRow, c + 1, rowCount, 1).setNumberFormat('@');
+  });
+}
+
+/** appendRow that survives Sheets' type inference. Returns the row number written. */
+function appendRowSafe_(t, obj) {
+  const row = objToRow_(t, obj);
+  const startRow = t.sheet.getLastRow() + 1;
+  forceTextCols_(t, startRow, 1);
+  t.sheet.getRange(startRow, 1, 1, t.headers.length).setValues([row]);
+  return startRow;
+}
+
 /** Returns the 1-based sheet row number for an id, or -1. */
 function findRow_(t, id) {
   const want = String(id);
@@ -71,7 +108,10 @@ function findRow_(t, id) {
 function setCells_(t, rowNum, patch) {
   Object.keys(patch).forEach(function (k) {
     if (t.index[k] === undefined) return;
-    t.sheet.getRange(rowNum, t.index[k] + 1).setValue(patch[k]);
+    const cell = t.sheet.getRange(rowNum, t.index[k] + 1);
+    // setValue re-infers type just like appendRow — see TEXT_FIELDS_.
+    if (TEXT_FIELDS_.indexOf(k) >= 0) cell.setNumberFormat('@');
+    cell.setValue(patch[k]);
   });
 }
 
@@ -126,6 +166,14 @@ function setCellsBatch_(t, patches) {
         if (t.index[k] !== undefined) rowValues[t.index[k] - minCol] = merged[r].patch[k];
       });
     }
+    // setValues re-infers type — force '@' on any TEXT_FIELDS_ column inside
+    // this span before writing. payment_date/payment_ref reach this path when
+    // applyImport_ marks a statement's worth of bills paid in one batch.
+    TEXT_FIELDS_.forEach(function (f) {
+      const c = t.index[f];
+      if (c === undefined || c < minCol || c > maxCol) return;
+      t.sheet.getRange(startRow, c + 1, rowCount, 1).setNumberFormat('@');
+    });
     range.setValues(values);
     i = j + 1;
   }

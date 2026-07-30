@@ -78,7 +78,7 @@ function createParty_(name) {
     notes: '',
     created_at: nowIso_()
   };
-  t.sheet.appendRow(objToRow_(t, party));
+  appendRowSafe_(t, party);
   return party;
 }
 
@@ -104,7 +104,7 @@ function createBill_(bill, user) {
     created_at: nowIso_()
   };
   const t = table_('bills');
-  t.sheet.appendRow(objToRow_(t, row));
+  appendRowSafe_(t, row);
   return row;
 }
 
@@ -237,12 +237,13 @@ function applyImport_(matches, unmatchedTxns) {
 
   if (newRows.length) {
     const startRow = txT.sheet.getLastRow() + 1;
-    // Force the ref column to plain text before writing. Left to Sheets'
-    // type inference, a digits-only ref (e.g. "007123456") is stored as a
-    // number, and String()-ing it back on the next import no longer equals
-    // the incoming ref — txnKey_ silently stops matching and the dedupe
-    // defence that replaced Postgres's unique constraint breaks.
-    txT.sheet.getRange(startRow, txT.index.ref + 1, newRows.length, 1).setNumberFormat('@');
+    // Force plain text on ref AND txn_date before writing — see TEXT_FIELDS_
+    // in Sheets.gs. A digits-only ref (e.g. "007123456") would otherwise be
+    // stored as a number, and String()-ing it back on the next import no
+    // longer equals the incoming ref: txnKey_ silently stops matching and the
+    // dedupe defence that replaced Postgres's unique constraint breaks.
+    // txn_date is equally at risk and used to be missed here.
+    forceTextCols_(txT, startRow, newRows.length);
     txT.sheet.getRange(startRow, 1, newRows.length, txT.headers.length).setValues(newRows);
   }
 
