@@ -32,7 +32,7 @@ with it.
 | `parties` | id, name, phone, notes, created_at |
 | `bills` | id, party_id, type, amount, bill_date, note, amount_expr, status, payment_ref, payment_date, created_by, created_at |
 | `bank_txns` | id, txn_date, amount, ref, description, matched_bill_id, imported_at |
-| `allowed_users` | email, active |
+| `allowed_users` | email, name, active |
 
 `allowed_users` is the one tab `scripts/backup-to-sheet.mjs` does not touch —
 it's maintained by hand, one row per person, `active` set to `TRUE`/`FALSE`.
@@ -52,13 +52,12 @@ It's also the one tab allowed to have no `id` column (`table_()` in
 - `bills!I` (payment_ref) — otherwise a UTR like `007123456` loses its
   leading zeros and prints wrong on the voucher.
 
-## Script properties
+## OAuth client ID
 
-Project Settings → Script Properties:
-
-| Key | Value |
-| --- | --- |
-| `GOOGLE_CLIENT_ID` | The OAuth client ID, ending `.apps.googleusercontent.com` |
+`clientId_()` in `Auth.gs` hardcodes the web-app OAuth client ID rather than
+reading a Script Property — the Apps Script REST API has no endpoint to set
+script properties from outside the editor, so hardcoding avoids a manual
+post-push step. Update that literal directly if the client ID ever changes.
 
 ## Deploying
 

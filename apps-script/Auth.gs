@@ -1,9 +1,10 @@
 /** ID token verification and the allowlist. */
 
 function clientId_() {
-  const id = PropertiesService.getScriptProperties().getProperty('GOOGLE_CLIENT_ID');
-  if (!id) throw new Error('GOOGLE_CLIENT_ID script property not set');
-  return id;
+  // The web-app OAuth client id (Task 1 Step 2). Hardcoded rather than a
+  // Script Property because the Apps Script REST API has no endpoint to set
+  // script properties from outside the editor.
+  return '788807437641-8e5qjroej7n22it1e8m1f095817u33sr.apps.googleusercontent.com';
 }
 
 function isAllowed_(email) {
