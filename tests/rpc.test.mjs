@@ -83,6 +83,29 @@ test('markPaid sends id, ref and date in one call', async () => {
   assert.deepEqual(sent.args, { id: 'b7', payment_ref: 'UTR9', payment_date: '2026-02-05' });
 });
 
+test('updateBillAmount sends id, amount and expression in one call', async () => {
+  reset({ ok: true, data: { ok: true, id: 'b7', amount: 2050, amount_expr: '1200+850' } });
+  await db.updateBillAmount('b7', 2050, '1200+850');
+  const sent = JSON.parse(calls[0].opts.body);
+  assert.equal(calls.length, 1);
+  assert.equal(sent.action, 'updateBillAmount');
+  assert.deepEqual(sent.args, { id: 'b7', amount: 2050, amount_expr: '1200+850' });
+});
+
+test('updateBillAmount sends an empty expression rather than undefined', async () => {
+  reset({ ok: true, data: { ok: true } });
+  await db.updateBillAmount('b7', 500);
+  // undefined would drop the key from the JSON entirely and the server would
+  // write "undefined" into amount_expr via String().
+  assert.deepEqual(JSON.parse(calls[0].opts.body).args,
+    { id: 'b7', amount: 500, amount_expr: '' });
+});
+
+test('updateBillAmount surfaces the server refusing a paid bill', async () => {
+  reset({ ok: false, error: 'bill is already marked paid — delete and re-enter it' });
+  await assert.rejects(() => db.updateBillAmount('b7', 100), /already marked paid/);
+});
+
 test('applyImport is one call carrying every match and unmatched txn', async () => {
   reset({ ok: true, data: { applied: 2, txns: 3 } });
   const payload = {

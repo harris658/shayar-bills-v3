@@ -109,6 +109,51 @@ function runTests() {
     assert_(errMsg.indexOf('greater than zero') >= 0,
       'rejection message mentions "greater than zero", got: ' + errMsg);
 
+    // --- updateBillAmount edits the figure and nothing else. Runs BEFORE the
+    // markPaid below, because a paid bill is not editable (asserted after).
+    const edited = createBill_({
+      party_id: p.id, type: 'paid', amount: 100,
+      bill_date: '2026-01-15', note: 'edit me', amount_expr: ''
+    }, user);
+    billIds.push(edited.id);
+    updateBillAmount_(edited.id, 2050.5, '1200+850+0.5');
+    let after = readAll_('bills').filter(function (b) { return b.id === edited.id; })[0];
+    assert_(after.amount === 2050.5, 'updateBillAmount sets the amount, got ' + after.amount);
+    assert_(typeof after.amount === 'number',
+      'edited amount is still stored as a number, got ' + typeof after.amount);
+    assert_(after.amount_expr === '1200+850+0.5',
+      'updateBillAmount stores the breakdown, got ' + after.amount_expr);
+    assert_(after.bill_date === '2026-01-15',
+      'updateBillAmount leaves bill_date alone, got ' + after.bill_date);
+    assert_(after.note === 'edit me', 'updateBillAmount leaves note alone, got ' + after.note);
+    assert_(after.status === 'pending', 'updateBillAmount leaves status alone');
+
+    // Clearing the breakdown (a plain number typed over a sum) must blank the
+    // column, not leave the old expression behind contradicting the amount.
+    updateBillAmount_(edited.id, 900, '');
+    after = readAll_('bills').filter(function (b) { return b.id === edited.id; })[0];
+    assert_(after.amount === 900, 'second edit applies, got ' + after.amount);
+    assert_(!after.amount_expr, 'an empty expression clears amount_expr, got ' + after.amount_expr);
+
+    threw = false; errMsg = '';
+    try { updateBillAmount_(edited.id, 0); } catch (e) { threw = true; errMsg = e.message; }
+    assert_(threw && errMsg.indexOf('greater than zero') >= 0,
+      'a zero amount is rejected, got: ' + errMsg);
+    threw = false;
+    try { updateBillAmount_('no-such-id', 500); } catch (e) { threw = true; }
+    assert_(threw, 'an unknown bill id is rejected');
+    after = readAll_('bills').filter(function (b) { return b.id === edited.id; })[0];
+    assert_(after.amount === 900, 'a rejected edit leaves the amount untouched');
+
+    // A settled bill is not editable — its voucher may be signed and filed.
+    markPaid_(edited.id, 'UTR-' + stamp + '-EDIT', '2026-02-01');
+    threw = false; errMsg = '';
+    try { updateBillAmount_(edited.id, 111); } catch (e) { threw = true; errMsg = e.message; }
+    assert_(threw && errMsg.indexOf('already marked paid') >= 0,
+      'editing a paid bill is refused server-side, got: ' + errMsg);
+    after = readAll_('bills').filter(function (b) { return b.id === edited.id; })[0];
+    assert_(after.amount === 900, 'the refused edit did not change the paid amount');
+
     // --- markPaid patches the right row
     markPaid_(bill.id, 'UTR-' + stamp + '-A', '2026-02-05');
     const paid = readAll_('bills').filter(function (b) { return b.id === bill.id; })[0];

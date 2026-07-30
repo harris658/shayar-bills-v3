@@ -28,6 +28,10 @@ body { margin: 0; background: var(--bg); color: var(--ink);
 .btn:disabled { opacity: .45; cursor: default; }
 input, select { width: 100%; padding: 9px 11px; border: 1px solid var(--line);
   border-radius: 8px; font: inherit; background: var(--surface); }
+/* Checkboxes must escape the width:100% above. In a 40px-wide table column it
+   squashed them to a few pixels — a tick target you had to aim at. */
+input[type="checkbox"] { width: 19px; height: 19px; padding: 0; margin: 0;
+  flex: none; accent-color: var(--brand); cursor: pointer; }
 label { display: block; margin: 12px 0 0; font-weight: 600; font-size: 13px;
   color: var(--ink-soft); }
 label input, label select { margin-top: 4px; }
@@ -43,6 +47,18 @@ table.tbl { width: 100%; border-collapse: collapse; }
 .tbl th { font-size: 12px; text-transform: uppercase; letter-spacing: .05em;
   color: var(--ink-soft); }
 .tbl td.num, .tbl th.num { text-align: right; font-variant-numeric: tabular-nums; }
+/* Tick column. The whole cell is the click target, not the 19px box inside it.
+   CSS alone cannot make a child fill a table cell reliably — an absolutely
+   positioned label with inset:0 resolves against the cell's baseline-aligned
+   content box in Chrome, which left the top ~12px of a wrapped row dead — so
+   the cell also carries a click handler (see js/screens/bills.js). The hover
+   lives on the cell so the feedback matches the real target. */
+.tbl .col-sel { width: 48px; padding: 0; cursor: pointer; }
+.tbl .col-sel:hover { background: #eef1f5; }
+.sel-box { display: flex; align-items: center; justify-content: center;
+  height: 100%; min-height: 42px; cursor: pointer; }
+.tbl .row-actions { white-space: nowrap; }
+.tbl .row-actions .btn { padding: 6px 11px; }
 .badge { font-size: 12px; font-weight: 700; padding: 2px 9px; border-radius: 99px; }
 .badge.pending { background: #fef3e2; color: var(--warn); }
 .badge.paid { background: #e6f7f0; color: var(--pos); }
@@ -71,7 +87,9 @@ table.tbl { width: 100%; border-collapse: collapse; }
 .map-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 16px; }
 .match-line { display: flex; gap: 10px; align-items: baseline; padding: 7px 4px;
   border-bottom: 1px solid var(--line); flex-wrap: wrap; }
-.match-line input { width: auto; }
+/* :not(checkbox) so the import screen's ticks keep the enlarged size set above
+   rather than being reset to the browser default. */
+.match-line input:not([type="checkbox"]) { width: auto; }
 .voucher { background: #fff; border: 1px solid #999; border-radius: 6px;
   padding: 18px 22px; max-width: 640px; margin: 0 auto 16px;
   page-break-inside: avoid; }

@@ -84,6 +84,12 @@
         payment_date: (opts && opts.payment_date) || ''
       });
     },
+    // Amount only, and the server refuses it on a bill already marked paid.
+    updateBillAmount(id, amount, amountExpr) {
+      return rpc('updateBillAmount', {
+        id: id, amount: amount, amount_expr: amountExpr || ''
+      });
+    },
     deleteBill(id) { return rpc('deleteBill', { id: id }); },
 
     // Wipes bills AND imported bank txns. The txns reference bills and, kept

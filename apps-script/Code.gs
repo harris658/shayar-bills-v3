@@ -34,6 +34,10 @@ function dispatch_(action, args, user) {
       return withLock_(function () {
         return markPaid_(args.id, args.payment_ref, args.payment_date);
       });
+    case 'updateBillAmount':
+      return withLock_(function () {
+        return updateBillAmount_(args.id, args.amount, args.amount_expr);
+      });
     case 'deleteBill':
       return withLock_(function () { return deleteBill_(args.id); });
     case 'deleteAllBills':
@@ -128,6 +132,35 @@ function markPaid_(id, paymentRef, paymentDate) {
     }
   }]);
   return { ok: true };
+}
+
+/**
+ * Corrects a mistyped amount. Amount only — party, date, note and direction are
+ * not editable, because a bill with a different party or direction is a
+ * different bill and should be deleted and re-entered.
+ *
+ * Refuses a bill already marked paid: its voucher may be signed and filed, and
+ * the payment it was matched against is recorded at the old figure. Enforced
+ * here rather than only in the UI — the client is not the authority on this, and
+ * a stale client could otherwise send an edit for a bill someone else just
+ * settled from another device.
+ *
+ * setCells_ rather than setCellsBatch_ on purpose: the batch would span
+ * amount..amount_expr, sweeping bill_date and note through a getValues/setValues
+ * round trip they have no reason to make.
+ */
+function updateBillAmount_(id, amount, amountExpr) {
+  const amt = Number(amount);
+  if (!(amt > 0)) throw new Error('amount must be greater than zero');
+  const t = table_('bills');
+  const rowNum = findRow_(t, id);
+  if (rowNum < 0) throw new Error('bill not found');
+  const row = t.rows[rowNum - 2]; // -1 header, -1 back to zero-based
+  if (String(row[t.index.status]).trim().toLowerCase() === 'paid') {
+    throw new Error('bill is already marked paid — delete and re-enter it');
+  }
+  setCells_(t, rowNum, { amount: amt, amount_expr: String(amountExpr || '') });
+  return { ok: true, id: String(id), amount: amt, amount_expr: String(amountExpr || '') };
 }
 
 function deleteBill_(id) {

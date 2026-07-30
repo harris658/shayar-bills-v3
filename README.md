@@ -32,11 +32,22 @@ domain.
 ```bash
 python3 -m http.server 8791          # from the app root
 node scripts/verify-perf.mjs         # needs playwright on the path
+node scripts/verify-bills-ui.mjs
 ```
 
-33 assertions: cache round trip and user scoping, warm-reload paint time,
-focus gate on fresh vs. >60s-old data, and every optimistic write plus its
-rollback (markPaid, deleteBill, createBill).
+`verify-perf.mjs` — 33 assertions: cache round trip and user scoping,
+warm-reload paint time, focus gate on fresh vs. >60s-old data, and every
+optimistic write plus its rollback (markPaid, deleteBill, createBill).
+
+`verify-bills-ui.mjs` — 34 assertions: tick-target hit testing, select-all
+scoped to the active filters, and the amount edit including validation,
+rollback and the server's refusal on a paid bill.
+
+Both **hit-test rather than measure** where it matters. A checkbox label that
+reported a plausible bounding box still had 12px of dead space at the top of
+each row, because Chrome resolves an absolutely positioned child of a `<td>`
+against the cell's baseline-aligned content box, not the cell. Clicking the
+corners and checking whether the row actually ticked is what caught it.
 
 ## Backend
 

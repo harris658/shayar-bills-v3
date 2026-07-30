@@ -112,6 +112,19 @@
     return { ok: true };
   });
 
+  // Mirrors updateBillAmount_ in apps-script/Code.gs, including its refusal on a
+  // bill already marked paid — that rejection is a path the UI has to handle.
+  STB.db.updateBillAmount = (id, amount, amountExpr) => respond('updateBillAmount', () => {
+    const amt = Number(amount);
+    if (!(amt > 0)) throw new Error('amount must be greater than zero');
+    const b = server.bills.find((x) => x.id === id);
+    if (!b) throw new Error('bill not found');
+    if (b.status === 'paid') throw new Error('bill is already marked paid — delete and re-enter it');
+    b.amount = amt;
+    b.amount_expr = String(amountExpr || '');
+    return { ok: true, id: id, amount: amt, amount_expr: b.amount_expr };
+  });
+
   STB.db.deleteBill = (id) => respond('deleteBill', () => {
     const i = server.bills.findIndex((x) => x.id === id);
     if (i < 0) throw new Error('bill not found');
