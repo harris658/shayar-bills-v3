@@ -14,9 +14,24 @@ only resolves for a bound script.
 | `Code.gs` | `doPost`, dispatch, data actions |
 | `Backup.gs` | Nightly Drive copy + 30-day prune |
 | `Tests.gs` | `runTests()` — run manually against a scratch copy |
+| `appsscript.json` | Manifest: web app access, timezone, runtime |
 
-Paste each file's contents into a file of the same name in the script editor.
-There is no automated deploy; this is a copy-paste project by design.
+The project was created and deployed through the Apps Script REST API via the
+`gws` CLI (`script projects create --parentId <sheet id>`, then
+`updateContent`, `versions create`, `deployments update`). Copy-paste into the
+editor also works, but keep `appsscript.json` in sync either way — it carries
+the web app access mode, which is load-bearing (see below).
+
+Two steps have no API and must be done by hand, once, as the owner:
+
+1. Enable the Apps Script API for the account at
+   <https://script.google.com/home/usersettings> — a per-account toggle,
+   unrelated to any GCP project setting.
+2. Run any function once from the editor and click through the OAuth consent
+   ("Advanced" → "Go to … (unsafe)" → "Allow"). Until then every request to
+   the deployment answers 401. The editor's function dropdown only populates
+   for the file currently open, and may stay empty for `Sheets.gs`; open
+   `Code.gs` and run `doPost` — the consent prompt covers the whole project.
 
 ## Spreadsheet layout
 
@@ -63,18 +78,62 @@ post-push step. Update that literal directly if the client ID ever changes.
 
 Deploy → New deployment → Web app:
 
-- Execute as: **Me**
-- Who has access: **Anyone**
+- Execute as: **Me** (`executeAs: USER_DEPLOYING`)
+- Who has access: **Anyone** — the option that does *not* say "with a Google
+  account" (`access: ANYONE_ANONYMOUS`)
 
-"Anyone" sounds alarming and is correct: the script itself verifies every
-caller's Google token against the `allowed_users` tab. It is what lets staff
-use the app without being given access to the spreadsheet file.
+That distinction is load-bearing and easy to get wrong. The manifest has two
+similar values:
+
+| Manifest value | Editor label | Behaviour |
+| --- | --- | --- |
+| `ANYONE` | "Anyone with a Google account" | Caller must be signed in **to Google in that request**. |
+| `ANYONE_ANONYMOUS` | "Anyone" | Truly public. **This is the one we need.** |
+
+`ANYONE` looks correct and fails in a way that hides its own cause. A
+cross-origin `fetch()` sends no cookies unless asked to, so every RPC from the
+app arrives unauthenticated, Apps Script rejects it with a 401 carrying no CORS
+headers, and the browser — unable to read a cross-origin error — reports only
+`TypeError: Failed to fetch`. Nothing in that message points at the deployment
+setting. Worse, the app still *loads*: sign-in is a Google-hosted flow that
+never touches this endpoint, so you land on a dashboard that renders zeroes,
+which is indistinguishable from a genuinely empty ledger.
+
+Anonymous at the platform layer is correct: the script verifies every caller's
+Google ID token against the `allowed_users` tab itself (`verifyToken_` in
+`Auth.gs`), including checking `aud` so a token minted for another app cannot
+be replayed. Platform-level anonymity is what lets staff use the app without
+being given access to the spreadsheet file.
 
 Copy the `/exec` URL into `js/config.js` as `APPS_SCRIPT_URL`.
 
 **After every code change, use Deploy → Manage deployments → edit → New
 version.** Creating a *new deployment* mints a different URL and the app will
-keep talking to the old code.
+keep talking to the old code. Via the API the equivalent is
+`versions create` then `deployments update` on the existing `deploymentId` —
+`deployments create` is what mints a new URL.
+
+### Verifying a deployment
+
+From the browser console on the app's own origin (not `curl` — see below):
+
+```js
+await fetch(STB.config.APPS_SCRIPT_URL, {
+  method: 'POST',
+  headers: {'Content-Type': 'text/plain;charset=utf-8'},
+  body: JSON.stringify({action: 'ping'})
+}).then(r => r.text());
+```
+
+Expected: `{"ok":false,"error":"not signed in"}` — HTTP 200 with parseable
+JSON. Sending `idToken: 'not-a-real-token'` should give
+`{"ok":false,"error":"session expired"}`. A `TypeError: Failed to fetch`
+instead means the deployment is on `ANYONE`, not `ANYONE_ANONYMOUS`.
+
+`curl` is not a usable check here: it rewrites POST to GET when following
+Apps Script's 302 to `googleusercontent.com`, so it reports 405 against a
+correctly working deployment (`--post302` does not reliably prevent this).
+Verify from a browser on the real origin.
 
 ## Nightly backups
 
