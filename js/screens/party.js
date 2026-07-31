@@ -6,6 +6,13 @@
   STB.screens.parties = {
     render(root) {
       const U = STB.util;
+      // Same reasoning as dashboard.js: STB.store.loaded is false for the
+      // ~2.5s before the first snapshot lands (and indefinitely for a user
+      // with no cached copy). "No parties yet" is a claim about the ledger,
+      // not about the fetch — don't make it before the fetch has answered.
+      const emptyMsg = STB.store.loaded
+        ? 'No parties yet — add one from New Bill.'
+        : 'Loading…';
       const pend = new Map(STB.ledger.outstandingByParty(STB.store.bills)
         .map((o) => [o.party_id, o]));
       const rows = STB.store.parties.map((p) => {
@@ -24,7 +31,7 @@
           <div class="tbl-wrap">
             <table class="tbl"><thead><tr><th>Party</th><th></th>
               <th class="num">To pay</th><th class="num">To receive</th></tr></thead>
-              <tbody>${rows || '<tr><td class="hint">No parties yet — add one from New Bill.</td></tr>'}</tbody></table>
+              <tbody>${rows || `<tr><td class="hint">${emptyMsg}</td></tr>`}</tbody></table>
           </div>
         </div>`;
     }
@@ -33,6 +40,15 @@
   STB.screens.party = {
     render(root, partyId) {
       const U = STB.util;
+      // Reached on a cold load of a bookmarked #/party/<id>, where boot()
+      // renders the route before the first snapshot lands. Both claims below
+      // are false in that window and the first is the more alarming one:
+      // partyById() misses against an empty store, so a party that exists
+      // renders "Party not found."
+      if (!STB.store.loaded) {
+        root.innerHTML = '<div class="card"><p class="hint">Loading…</p></div>';
+        return;
+      }
       const p = STB.partyById(partyId);
       if (!p) { root.innerHTML = '<div class="card">Party not found.</div>'; return; }
       const bills = STB.store.bills.filter((b) => b.party_id === partyId);

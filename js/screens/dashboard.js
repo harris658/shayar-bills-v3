@@ -6,6 +6,38 @@
   STB.screens.dashboard = {
     render(root) {
       const U = STB.util;
+      // STB.store.loaded is false for the ~2.5s between boot() painting the
+      // route and STB.refresh() landing — and indefinitely for a user with no
+      // cached snapshot (cache.js scopes the cache by email, so the second
+      // signed-in user, or anyone after Sign out, always starts here). Without
+      // this guard that window rendered "Nothing pending 🎉" / "No bills yet."
+      // / a confident ₹0 over a ledger that in fact holds real numbers — a
+      // shipped bug. Show a neutral loading state instead of any empty-state
+      // copy or figure until the first snapshot actually lands.
+      if (!STB.store.loaded) {
+        root.innerHTML = `
+          <div class="stat-row">
+            <div class="card stat"><div class="hint">To pay (pending)</div>
+              <div class="stat-num">—</div></div>
+            <div class="card stat"><div class="hint">To receive (pending)</div>
+              <div class="stat-num">—</div></div>
+            <div class="card stat"><div class="hint">Paid this month</div>
+              <div class="stat-num">—</div></div>
+            <div class="card stat"><div class="hint">Received this month</div>
+              <div class="stat-num">—</div></div>
+          </div>
+          <div class="dash-cols">
+            <div class="card">
+              <h3 style="margin-top:0">Outstanding by party</h3>
+              <p class="hint">Loading…</p>
+            </div>
+            <div class="card">
+              <h3 style="margin-top:0">Recent bills</h3>
+              <p class="hint">Loading…</p>
+            </div>
+          </div>`;
+        return;
+      }
       const bills = STB.store.bills;
       const month = U.todayStr().slice(0, 7);
       const t = STB.ledger.totals(bills, month);

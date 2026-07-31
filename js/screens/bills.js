@@ -89,7 +89,14 @@
                 </label></th>
                 <th>Date</th><th>Party</th><th>Note</th>
                 <th class="num">Amount</th><th>Status</th><th></th></tr></thead>
-              <tbody>${rows || '<tr><td colspan="7" class="hint">No bills match.</td></tr>'}</tbody>
+              <tbody>${rows || `<tr><td colspan="7" class="hint">${
+                // "No bills match." is a claim about the filters, made against
+                // a loaded store. Before the first snapshot lands, the store
+                // is empty for the same reason every row is missing, and
+                // saying so would look identical to a genuinely empty ledger
+                // (see dashboard.js / party.js for the same distinction).
+                STB.store.loaded ? 'No bills match.' : 'Loading…'
+              }</td></tr>`}</tbody>
             </table>
           </div>
         </div>`;

@@ -41,12 +41,23 @@ await page.waitForFunction(() => window.HZ && window.STB, null, { timeout: 5000 
 const coldEarly = await dash();
 check('cold load shows no ledger before the network answers',
   !/12,500/.test(coldEarly), 'early dashboard: ' + coldEarly.slice(0, 90));
+// ITEM (empty-state bug): store.loaded is false here — this is exactly the
+// window that used to render "Nothing pending 🎉" / "No bills yet." / a
+// confident ₹0 over a ledger that (per HZ.server above) actually holds two
+// bills. Assert the loading state instead, not the empty-state copy.
+check('ITEM 1b — not-loaded dashboard shows a loading state, not the empty-state copy',
+  !/Nothing pending/.test(coldEarly) && !/No bills yet\./.test(coldEarly) && /Loading/.test(coldEarly),
+  'early dashboard: ' + coldEarly.slice(0, 120));
+check('ITEM 1b — not-loaded dashboard does not show a confident ₹0 KPI',
+  !/₹0(?!\S)/.test(coldEarly.replace(/&nbsp;| /g, ' ')), coldEarly.slice(0, 120));
 
 await page.waitForFunction(() => STB.store.loaded === true, null, { timeout: 8000 });
 await page.waitForTimeout(150);
 const coldLoaded = await dash();
 check('after snapshot the real ledger is on screen', /12,500|16,800/.test(coldLoaded.replace(/\s/g, '')) || /₹/.test(coldLoaded),
   coldLoaded.slice(0, 120));
+check('ITEM 1b — once the snapshot lands the loading state is gone',
+  !/Loading/.test(coldLoaded), coldLoaded.slice(0, 120));
 
 const rawCache = await page.evaluate(() => window.HZ.cacheRaw());
 check('ITEM 1 — snapshot was written to localStorage',
@@ -68,30 +79,45 @@ check('ITEM 1 — the pre-network paint is the cached ledger, not zeros',
 // wait out the background refresh so the store is server-fresh
 await page.waitForTimeout(2600);
 
-// ============ 3. focus staleness gate ======================================
+// ============ 3. focus/visibility refresh, always (no staleness gate) ======
+// Harshit's chosen fix for "the other person's open tab never updates":
+// every return-to-tab refreshes, full stop. The old staleness gate (skip a
+// focus refresh when the snapshot was under 60s old) is gone entirely —
+// otherwise the two-person ledger can sit stale in an already-open tab
+// indefinitely after the other person edits it.
 async function focusCycle() {
   const before = await page.evaluate(() => window.HZ.log.filter((l) => l.includes('→ snapshot')).length);
   await page.evaluate(() => window.dispatchEvent(new Event('focus')));
-  await page.waitForTimeout(300);
+  await page.waitForTimeout(2400); // let the (now real) refresh land
   const after = await page.evaluate(() => window.HZ.log.filter((l) => l.includes('→ snapshot')).length);
   return after - before;
 }
-check('ITEM 2 — a focus on fresh data fires NO snapshot', (await focusCycle()) === 0);
-check('ITEM 2 — repeated focus events still fire nothing',
-  (await focusCycle()) + (await focusCycle()) === 0);
+check('ITEM 2 — a focus on fresh data now DOES fire exactly one snapshot', (await focusCycle()) === 1);
 
-// Force the store stale by jumping the clock past STALE_MS. Restore by
-// reassigning the captured original — `delete Date.now` removes the own
-// property outright and leaves Date.now undefined, which silently breaks every
-// later timestamp in the app.
-await page.evaluate(() => {
-  window.__realNow = Date.now;
-  Date.now = () => window.__realNow() + 61000;
-});
-check('ITEM 2 — a focus on data older than 60s DOES refresh', (await focusCycle()) === 1);
-await page.evaluate(() => { Date.now = window.__realNow; });
-check('harness restored Date.now', await page.evaluate(() => typeof Date.now() === 'number'));
-await page.waitForTimeout(2400);
+async function visibilityCycle() {
+  const before = await page.evaluate(() => window.HZ.log.filter((l) => l.includes('→ snapshot')).length);
+  await page.evaluate(() => {
+    Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'visible' });
+    document.dispatchEvent(new Event('visibilitychange'));
+  });
+  await page.waitForTimeout(2400);
+  const after = await page.evaluate(() => window.HZ.log.filter((l) => l.includes('→ snapshot')).length);
+  return after - before;
+}
+check('ITEM 2 — visibilitychange (visible) also fires a snapshot', (await visibilityCycle()) === 1);
+
+// The two listeners routinely both fire for one real tab switch. Without the
+// in-flight guard on STB.refresh, that used to cost two backend round trips
+// per switch instead of one.
+check('ITEM 2 — focus + visibilitychange fired together collapse into ONE backend call',
+  await page.evaluate(async () => {
+    const before = window.HZ.log.filter((l) => l.includes('→ snapshot')).length;
+    window.dispatchEvent(new Event('focus'));
+    document.dispatchEvent(new Event('visibilitychange'));
+    await new Promise((r) => setTimeout(r, 2400));
+    const after = window.HZ.log.filter((l) => l.includes('→ snapshot')).length;
+    return after - before === 1;
+  }));
 
 // ============ 4. optimistic markPaid =======================================
 await page.evaluate(() => { location.hash = '#/bills'; });
@@ -226,6 +252,20 @@ check('sign-out clears the cached ledger',
 check('sign-out empties the store',
   await page.evaluate(() => STB.store.bills.length === 0 && STB.store.loaded === false));
 
+// ============ 9b. a loaded store that is genuinely empty shows the real
+// empty-state copy — the regression the loading-state fix could reintroduce
+// in reverse if it hid the empty-state copy unconditionally instead of only
+// while !loaded. ========================================================
+await page.evaluate(() => { window.HZ.server.bills = []; });
+await page.evaluate(() => document.querySelector('#l-btn button').click());
+await page.waitForFunction(() => window.STB && STB.store.loaded === true, null, { timeout: 8000 });
+await page.evaluate(() => { location.hash = '#/dashboard'; });
+await page.waitForTimeout(150);
+const emptyLoadedDash = await dash();
+check('ITEM 1b — a genuinely empty, LOADED store still shows the real empty-state copy',
+  /Nothing pending/.test(emptyLoadedDash) && /No bills yet\./.test(emptyLoadedDash),
+  emptyLoadedDash.slice(0, 160));
+
 // ============ 10. cache is scoped to the signed-in user ==================
 await page.evaluate(() => {
   STB.cache.write('someone.else@example.com', [{ id: 'x', name: 'Ghost' }],
@@ -237,6 +277,29 @@ await page.waitForTimeout(300);
 check("another user's cached ledger is never painted",
   await page.evaluate(() => !STB.store.bills.some((b) => b.id === 'g')),
   await page.evaluate(() => JSON.stringify(STB.store.bills.map((b) => b.id))));
+
+// ============ 10. party detail on a cold load ==============================
+// A bookmarked #/party/<id> is rendered by boot() before the first snapshot
+// lands. partyById() misses against an empty store, so this route claimed
+// "Party not found." for a party that demonstrably exists — a worse lie than
+// the dashboard's, because it reads as data loss rather than an empty ledger.
+await page.evaluate(() => {
+  localStorage.removeItem('stb.snapshot.v1');
+  location.hash = '#/party/p-1';
+});
+await page.reload({ waitUntil: 'load' });
+await page.waitForFunction(() => window.HZ && window.STB, null, { timeout: 5000 });
+const partyEarly = await dash();
+check('ITEM 1b — cold #/party/<id> shows Loading, not "Party not found."',
+  /Loading/.test(partyEarly) && !/Party not found/.test(partyEarly),
+  'early party detail: ' + partyEarly.slice(0, 120));
+
+await page.waitForFunction(() => STB.store.loaded === true, null, { timeout: 8000 });
+await page.waitForTimeout(150);
+const partyLoaded = await dash();
+check('ITEM 1b — party detail renders the real party once the snapshot lands',
+  /Alpha Fabrics/.test(partyLoaded) && !/Party not found/.test(partyLoaded),
+  partyLoaded.slice(0, 120));
 
 // The three rollback cases deliberately reject, and the handlers are supposed
 // to console.error them — those are expected. Anything else is not.

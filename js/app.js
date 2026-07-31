@@ -25,13 +25,6 @@
   STB.pendingId = () => PENDING_PREFIX + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
   STB.isPending = (id) => String(id).indexOf(PENDING_PREFIX) === 0;
 
-  // When the store was last known to match the server — a successful snapshot,
-  // or the timestamp the restored cache was written at.
-  let snapshotAt = 0;
-
-  // How old the store must be before a window focus is worth 2.5s of freeze.
-  const STALE_MS = 60000;
-
   function signedInEmail() {
     const s = STB.auth.session();
     return s ? s.email : '';
@@ -62,51 +55,74 @@
   // different client, an unverified email, and an allowlist rejection.
   const AUTH_DEAD_RE = /session expired|not signed in|not authorised|token not for this app|email not verified/i;
 
+  // In-flight guard: focus and visibilitychange both fire, routinely both at
+  // once, for a single tab switch (see the two listeners below). Without this,
+  // every alt-tab back cost two full snapshot round trips instead of one.
+  // Overlapping callers collapse onto the same promise rather than each
+  // kicking off their own request.
+  let refreshInFlight = null;
+
   STB.refresh = async function () {
-    try {
-      const { parties, bills } = await STB.db.snapshot();
-      STB.store.parties = parties;
-      STB.store.bills = bills;
-      STB.store.loaded = true;
-      snapshotAt = Date.now();
-      STB.persistStore();
-      STB.renderRoute();
-    } catch (e) {
-      console.error('refresh failed', e);
-      // A dead session must land on the sign-in screen, not a toast that
-      // leaves a stale ledger on screen looking live.
-      if (AUTH_DEAD_RE.test(e.message || '')) {
-        // The token can still be locally valid (e.g. an allowlist
-        // rejection) — clear it so getSession() stops reporting a session
-        // that the server has already refused, and so a stale route change
-        // (hashchange) can't render data screens over it. signOut() (not
-        // clear()) also disables auto-select, so a reload doesn't silently
-        // re-mint the same rejected identity and flash the app chrome
-        // before bouncing back to login. Routed through STB.db, matching
-        // every other call site in this file.
-        STB.db.signOut();
-        // The server refused this identity (expired, revoked, or dropped from
-        // allowed_users) — drop the cached ledger with the token rather than
-        // leaving it to paint for whoever signs in next on this device.
-        STB.cache.clear();
-        STB.store.loaded = false;
-        snapshotAt = 0;
-        topbar.hidden = true;
-        renderedRoute = null;
-        STB.screens.login.render(root, e.message || true);
-        return;
+    if (refreshInFlight) return refreshInFlight;
+    refreshInFlight = (async () => {
+      try {
+        const { parties, bills } = await STB.db.snapshot();
+        STB.store.parties = parties;
+        STB.store.bills = bills;
+        STB.store.loaded = true;
+        STB.persistStore();
+        STB.renderRoute();
+      } catch (e) {
+        console.error('refresh failed', e);
+        // A dead session must land on the sign-in screen, not a toast that
+        // leaves a stale ledger on screen looking live.
+        if (AUTH_DEAD_RE.test(e.message || '')) {
+          // The token can still be locally valid (e.g. an allowlist
+          // rejection) — clear it so getSession() stops reporting a session
+          // that the server has already refused, and so a stale route change
+          // (hashchange) can't render data screens over it. signOut() (not
+          // clear()) also disables auto-select, so a reload doesn't silently
+          // re-mint the same rejected identity and flash the app chrome
+          // before bouncing back to login. Routed through STB.db, matching
+          // every other call site in this file.
+          STB.db.signOut();
+          // The server refused this identity (expired, revoked, or dropped
+          // from allowed_users) — drop the cached ledger with the token
+          // rather than leaving it to paint for whoever signs in next on
+          // this device.
+          STB.cache.clear();
+          STB.store.loaded = false;
+          topbar.hidden = true;
+          renderedRoute = null;
+          STB.screens.login.render(root, e.message || true);
+          return;
+        }
+        STB.toast('Could not refresh data — check connection');
       }
-      STB.toast('Could not refresh data — check connection');
+    })();
+    try {
+      await refreshInFlight;
+    } finally {
+      refreshInFlight = null;
     }
   };
 
-  // Alt-tabbing back used to cost a full `snapshot` (~2.5s of frozen UI) every
-  // single time, because Apps Script's per-request floor is ~1.5s no matter how
-  // little it reads. This is a two-person ledger, so data more recent than a
-  // minute is almost certainly still current; refresh only past that.
+  // Both users share one Sheet, so the other person's edit never reaches an
+  // already-open tab until something asks the server again. Polling was
+  // considered and rejected (needless load on the Apps Script floor for a
+  // two-person ledger); refreshing on every return-to-tab is the chosen fix,
+  // no staleness gate. `focus` covers alt-tab / window switch on desktop.
   window.addEventListener('focus', () => {
     if (topbar.hidden) return;
-    if (Date.now() - snapshotAt < STALE_MS) return;
+    STB.refresh();
+  });
+  // `focus` is unreliable for mobile/PWA tab switching (backgrounding an app
+  // doesn't always blur/focus the window) — visibilitychange is what actually
+  // fires there. Both listeners commonly fire together for one switch; the
+  // in-flight guard on STB.refresh above is what keeps that to one request.
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState !== 'visible') return;
+    if (topbar.hidden) return;
     STB.refresh();
   });
 
@@ -212,7 +228,6 @@
       STB.store.parties = cached.parties;
       STB.store.bills = cached.bills;
       STB.store.loaded = true;
-      snapshotAt = cached.at;
     }
     renderRoute();
     STB.refresh();
@@ -226,7 +241,6 @@
     await STB.db.signOut();
     STB.cache.clear();
     STB.store = { parties: [], bills: [], loaded: false };
-    snapshotAt = 0;
     location.hash = '';
     STB.boot({ skipRenew: true });
   });
