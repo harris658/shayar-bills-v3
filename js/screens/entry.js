@@ -35,7 +35,6 @@
       const party = $('#f-party'), amount = $('#f-amount'), date = $('#f-date'),
         note = $('#f-note'), drop = $('#party-drop'), preview = $('#amount-preview');
       let type = 'paid';
-      let hi = 0; // highlighted dropdown index
 
       root.querySelectorAll('.type-btn').forEach((b) => {
         b.addEventListener('click', () => {
@@ -45,64 +44,12 @@
         });
       });
 
-      function matches() {
-        const q = party.value.trim().toLowerCase();
-        if (!q) return [];
-        return STB.store.parties.filter((p) => p.name.toLowerCase().includes(q)).slice(0, 6);
-      }
-      function exact() {
-        const q = party.value.trim().toLowerCase();
-        return STB.store.parties.find((p) => p.name.toLowerCase() === q) || null;
-      }
-      function renderDrop() {
-        const m = matches();
-        const canCreate = party.value.trim() && !exact();
-        const items = m.map((p, i) =>
-          `<div class="drop-item${i === hi ? ' hi' : ''}" data-i="${i}">${U$.escapeHTML(p.name)}</div>`);
-        if (canCreate) items.push(
-          `<div class="drop-item create${hi === m.length ? ' hi' : ''}" data-i="${m.length}">+ Create “${U$.escapeHTML(party.value.trim())}”</div>`);
-        drop.innerHTML = items.join('');
-        drop.hidden = items.length === 0;
-      }
-      let picking = false;
-      async function pick(i) {
-        if (picking) return;
-        const m = matches();
-        if (i < m.length) { party.value = m[i].name; }
-        else {
-          picking = true;
-          try {
-            const p = await STB.db.createParty(party.value.trim());
-            STB.store.parties.push(p);
-            STB.store.parties.sort((a, b) => a.name.localeCompare(b.name));
-            STB.toast('Party created ✓');
-          } catch (e) {
-            console.error('createParty failed', e);
-            STB.toast('Could not create party — check connection');
-            return;
-          } finally {
-            picking = false;
-          }
-        }
-        drop.hidden = true;
-        amount.focus();
-      }
-      party.addEventListener('input', () => { hi = 0; renderDrop(); });
-      party.addEventListener('keydown', (e) => {
-        const total = matches().length + (party.value.trim() && !exact() ? 1 : 0);
-        if (e.key === 'ArrowDown') { hi = Math.min(hi + 1, total - 1); renderDrop(); e.preventDefault(); }
-        else if (e.key === 'ArrowUp') { hi = Math.max(hi - 1, 0); renderDrop(); e.preventDefault(); }
-        else if (e.key === 'Enter' && !e.ctrlKey && !e.metaKey) {
-          e.preventDefault();
-          if (exact()) { drop.hidden = true; amount.focus(); }
-          else if (total > 0) pick(hi);
-        }
+      // The type-ahead itself lives in js/lib/party-picker.js — the invoice form
+      // uses the very same field.
+      const picker = STB.partyPicker.attach({
+        input: party, drop: drop, onPick: () => amount.focus()
       });
-      drop.addEventListener('mousedown', (e) => {
-        const item = e.target.closest('.drop-item');
-        if (item) { e.preventDefault(); pick(Number(item.dataset.i)); }
-      });
-      party.addEventListener('blur', () => setTimeout(() => { drop.hidden = true; }, 150));
+      const exact = picker.exact;
 
       amount.addEventListener('input', () => {
         const v = U$.safeEval(amount.value.trim());

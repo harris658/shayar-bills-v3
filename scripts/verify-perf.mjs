@@ -191,6 +191,35 @@ check('ITEM 3 — a failed delete puts the bill back',
 check('ITEM 3 — the restored bill is back in the DOM',
   await page.evaluate(() => !!document.querySelector('tr[data-id="b-3"]')));
 
+// ============ 6b. the shared party type-ahead on New Bill ==================
+// The picker moved into js/lib/party-picker.js so the invoice form could use
+// the same field. These cover the New Bill mount of it — filling the input
+// with an exact name (below) never touches the dropdown or the create path.
+await page.evaluate(() => { location.hash = '#/new'; });
+await page.waitForTimeout(250);
+await page.fill('#f-party', 'Alph');
+await page.waitForTimeout(150);
+// One suggestion, plus a "+ Create" — "Alph" matches Alpha Fabrics but is not
+// itself a party, so offering to create it is correct, not a stray row.
+check('PICKER — typing filters the party list',
+  (await page.locator('#party-drop .drop-item:not(.create)').count()) === 1 &&
+  (await page.locator('#party-drop .drop-item.create').count()) === 1);
+await page.locator('#party-drop .drop-item').first().click();
+await page.waitForTimeout(150);
+check('PICKER — clicking a suggestion fills the field and closes the list',
+  (await page.inputValue('#f-party')) === 'Alpha Fabrics' &&
+  (await page.locator('#party-drop').isHidden()));
+
+await page.fill('#f-party', 'Delta Weaves');
+await page.waitForTimeout(150);
+check('PICKER — an unknown name offers "+ Create"',
+  (await page.locator('#party-drop .drop-item.create').count()) === 1);
+await page.locator('#party-drop .drop-item.create').click();
+await page.waitForTimeout(2500);
+check('PICKER — "+ Create" creates the party and selects it',
+  await page.evaluate(() => window.HZ.server.parties.some((p) => p.name === 'Delta Weaves')) &&
+  (await page.inputValue('#f-party')) === 'Delta Weaves');
+
 // ============ 7. optimistic createBill (existing party) ====================
 await page.evaluate(() => { location.hash = '#/new'; });
 await page.waitForTimeout(250);

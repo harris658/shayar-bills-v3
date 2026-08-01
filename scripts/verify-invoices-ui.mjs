@@ -44,7 +44,13 @@ check('the invoices screen renders both cards',
   (await page.locator('#inv-save').count()) === 1 &&
   (await page.locator('#v-create').count()) === 1);
 
-await page.selectOption('#f-party', { label: 'Alpha Fabrics' });
+await page.fill('#f-party', 'Alpha Fab');
+await page.waitForTimeout(200);
+check('typing filters the party list', (await page.locator('.drop-item').count()) >= 1);
+await page.locator('.drop-item').first().click();
+await page.waitForTimeout(200);
+check('picking a party fills the field and moves to the invoice number',
+  (await page.inputValue('#f-party')) === 'Alpha Fabrics');
 await page.fill('#f-no', 'JFPS26-27-000999');
 await page.fill('#f-amount', '5000');
 await page.fill('#f-date', '2026-07-30');
@@ -75,22 +81,20 @@ check('the provisional row was swapped for the server row',
 
 // --------------------------------------------------------- new party inline ---
 // A new vendor's first invoice has to be enterable without leaving the screen.
-await page.selectOption('#f-party', '__new');
+await page.fill('#f-party', 'Gamma Mills');
 await page.waitForTimeout(200);
-check('choosing "+ New party…" opens an inline name field',
-  (await page.locator('#f-newparty').count()) === 1 &&
-  (await page.locator('#f-addparty').count()) === 1);
-
-await page.fill('#f-newparty', 'Gamma Mills');
-await page.click('#f-addparty');
+const createLabel = await page.locator('.drop-item.create').innerText();
+check('an unknown name offers "+ Create", exactly as New Bill does',
+  /\+ Create/.test(createLabel) && createLabel.includes('Gamma Mills'), createLabel);
+await page.locator('.drop-item.create').click();
 await page.waitForTimeout(SETTLE);
 check('the party is created on the server',
   await page.evaluate(() => window.HZ.server.parties.some((p) => p.name === 'Gamma Mills')));
-check('it is selected on the form and the panel closes',
+check('the new party ends up in the field with the dropdown closed',
   await page.evaluate(() => {
     const p = STB.store.parties.find((x) => x.name === 'Gamma Mills');
-    const sel = document.querySelector('#f-party');
-    return !!p && sel.value === p.id && !document.querySelector('#f-newparty');
+    return !!p && document.querySelector('#f-party').value === 'Gamma Mills' &&
+      document.querySelector('#party-drop').hidden;
   }));
 
 // An invoice against the brand-new party must save like any other.
@@ -106,21 +110,32 @@ check('an invoice saves against the newly created party',
 
 // Typing a name that already exists should pick it, not round-trip to be told off.
 const partiesBefore = await page.evaluate(() => window.HZ.server.parties.length);
-await page.selectOption('#f-party', '__new');
-await page.waitForTimeout(200);
-await page.fill('#f-newparty', 'alpha fabrics');   // different case on purpose
-await page.click('#f-addparty');
-await page.waitForTimeout(400);
-check('an existing name selects that party instead of creating a duplicate',
+await page.fill('#f-party', 'alpha fabrics');   // different case on purpose
+await page.waitForTimeout(250);
+check('an existing name offers no "+ Create", so no duplicate can be made',
+  (await page.locator('.drop-item.create').count()) === 0);
+await page.fill('#f-no', 'DUP-CHECK');
+await page.fill('#f-amount', '1');
+await page.click('#inv-save');
+await page.waitForTimeout(SETTLE);
+check('saving on a typed existing name reuses that party, case and all',
   await page.evaluate((n) => {
     const alpha = STB.store.parties.find((x) => x.name === 'Alpha Fabrics');
-    return window.HZ.server.parties.length === n &&
-      document.querySelector('#f-party').value === alpha.id &&
-      !document.querySelector('#f-newparty');
+    const inv = window.HZ.server.invoices.find((i) => i.invoice_no === 'DUP-CHECK');
+    return window.HZ.server.parties.length === n && inv && inv.party_id === alpha.id;
   }, partiesBefore));
 
-// Put the form back on Alpha Fabrics for the builder section below.
-await page.selectOption('#f-party', { label: 'Alpha Fabrics' });
+// Drop the probe invoice again so the counts below describe the pool this test
+// actually set up, rather than carrying a ₹1 artefact through every later sum.
+await page.evaluate(async () => {
+  const inv = STB.store.invoices.find((i) => i.invoice_no === 'DUP-CHECK');
+  await STB.db.deleteInvoice(inv.id);
+  await STB.refresh();
+});
+await page.waitForTimeout(SETTLE);
+
+// Leave the field on Alpha Fabrics for the builder section below.
+await page.fill('#f-party', 'Alpha Fabrics');
 
 // ------------------------------------------------------------ build a voucher
 await page.selectOption('#v-party', { label: 'Alpha Fabrics' });
