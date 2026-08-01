@@ -20,7 +20,11 @@
 
   // Module-level so a re-render (after every save) does not empty the form
   // under the person typing, and so ticks survive the list rebuilding.
-  const form = { party_id: '', invoice_no: '', amount: '', invoice_date: '', note: '' };
+  const form = { party_id: '', invoice_no: '', amount: '', invoice_date: '', note: '',
+    newParty: false, newPartyName: '' };
+
+  // Sentinel option value. A party id is a UUID, so this cannot collide.
+  const NEW_PARTY = '__new';
   const ui = { party: '', showAll: false, editing: null, billDate: '' };
   const selected = new Set();
   let busy = false;
@@ -101,8 +105,16 @@
             it is time to pay.
           </p>
           <label>Party
-            <select id="f-party">${partyOptions(form.party_id, 'Select a party…')}</select>
+            <select id="f-party">${partyOptions(form.party_id, 'Select a party…')
+              }<option value="${NEW_PARTY}">+ New party…</option></select>
           </label>
+          ${form.newParty ? `
+          <div class="filters" style="margin:-4px 0 10px;align-items:center">
+            <input id="f-newparty" autocomplete="off" placeholder="New party name"
+                   value="${U.escapeHTML(form.newPartyName)}" style="max-width:260px">
+            <button class="btn secondary" id="f-addparty">Add party</button>
+            <button class="btn ghost" id="f-cancelparty">Cancel</button>
+          </div>` : ''}
           <label>Invoice number
             <input id="f-no" autocomplete="off" placeholder="JFPS26-27-000168"
                    value="${U.escapeHTML(form.invoice_no)}">
@@ -164,7 +176,79 @@
       bindForm('#f-amount', 'amount');
       bindForm('#f-note', 'note');
       $('#f-date').addEventListener('change', (e) => { form.invoice_date = e.target.value; });
-      $('#f-party').addEventListener('change', (e) => { form.party_id = e.target.value; });
+      $('#f-party').addEventListener('change', (e) => {
+        if (e.target.value === NEW_PARTY) {
+          // Keep whatever party was already chosen selected underneath, so
+          // cancelling puts the form back exactly where it was.
+          form.newParty = true;
+          rerender();
+          const el = root.querySelector('#f-newparty');
+          if (el) el.focus();
+          return;
+        }
+        form.party_id = e.target.value;
+      });
+
+      const newPartyInput = $('#f-newparty');
+      if (newPartyInput) {
+        newPartyInput.addEventListener('input', (e) => { form.newPartyName = e.target.value; });
+        newPartyInput.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter') { e.preventDefault(); addParty(); }
+        });
+        $('#f-cancelparty').addEventListener('click', () => {
+          form.newParty = false; form.newPartyName = ''; rerender();
+        });
+        $('#f-addparty').addEventListener('click', addParty);
+      }
+
+      let addingParty = false;
+      async function addParty() {
+        if (addingParty) return;
+        const name = form.newPartyName.trim();
+        if (!name) { STB.toast('Party name is required'); return; }
+
+        // If it already exists, just pick it. The server would refuse the
+        // duplicate anyway, and a round trip to be told "already exists" when
+        // the right answer is "here it is" helps nobody.
+        const existing = STB.store.parties.find(
+          (p) => p.name.trim().toLowerCase() === name.toLowerCase());
+        if (existing) {
+          form.party_id = existing.id;
+          form.newParty = false; form.newPartyName = '';
+          STB.toast('Party already exists — selected it');
+          rerender();
+          root.querySelector('#f-no').focus();
+          return;
+        }
+
+        addingParty = true;
+        const btn = root.querySelector('#f-addparty');
+        if (btn) { btn.disabled = true; btn.textContent = 'Adding…'; }
+        try {
+          // Awaited, not optimistic: the invoice needs the server's party id,
+          // and a temporary one would have to be threaded through the invoice
+          // and fixed up on both afterwards — two reconciliations racing each
+          // other. Same call the New Bill form makes, for the same reason.
+          const p = await STB.db.createParty(name);
+          STB.store.parties.push(p);
+          STB.store.parties.sort((a, b) => a.name.localeCompare(b.name));
+          form.party_id = p.id;
+          form.newParty = false; form.newPartyName = '';
+          STB.toast('Party created ✓');
+          STB.commitStore();
+          const no = root.querySelector('#f-no');
+          if (no) no.focus();
+        } catch (e) {
+          console.error('createParty failed', e);
+          // Surface the server's own reason — "party already exists" is a real
+          // outcome (someone added it from another device) and is not a
+          // connection problem.
+          STB.toast(String(e.message || e));
+          if (btn) { btn.disabled = false; btn.textContent = 'Add party'; }
+        } finally {
+          addingParty = false;
+        }
+      }
 
       let saving = false;
       function saveInvoice() {

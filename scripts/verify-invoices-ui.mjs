@@ -73,6 +73,55 @@ check('the provisional row was swapped for the server row',
     return inv && !STB.isPending(inv.id);
   }));
 
+// --------------------------------------------------------- new party inline ---
+// A new vendor's first invoice has to be enterable without leaving the screen.
+await page.selectOption('#f-party', '__new');
+await page.waitForTimeout(200);
+check('choosing "+ New party…" opens an inline name field',
+  (await page.locator('#f-newparty').count()) === 1 &&
+  (await page.locator('#f-addparty').count()) === 1);
+
+await page.fill('#f-newparty', 'Gamma Mills');
+await page.click('#f-addparty');
+await page.waitForTimeout(SETTLE);
+check('the party is created on the server',
+  await page.evaluate(() => window.HZ.server.parties.some((p) => p.name === 'Gamma Mills')));
+check('it is selected on the form and the panel closes',
+  await page.evaluate(() => {
+    const p = STB.store.parties.find((x) => x.name === 'Gamma Mills');
+    const sel = document.querySelector('#f-party');
+    return !!p && sel.value === p.id && !document.querySelector('#f-newparty');
+  }));
+
+// An invoice against the brand-new party must save like any other.
+await page.fill('#f-no', 'GM-0001');
+await page.fill('#f-amount', '1500');
+await page.click('#inv-save');
+await page.waitForTimeout(SETTLE);
+check('an invoice saves against the newly created party',
+  await page.evaluate(() => {
+    const p = window.HZ.server.parties.find((x) => x.name === 'Gamma Mills');
+    return window.HZ.server.invoices.some((i) => i.invoice_no === 'GM-0001' && i.party_id === p.id);
+  }));
+
+// Typing a name that already exists should pick it, not round-trip to be told off.
+const partiesBefore = await page.evaluate(() => window.HZ.server.parties.length);
+await page.selectOption('#f-party', '__new');
+await page.waitForTimeout(200);
+await page.fill('#f-newparty', 'alpha fabrics');   // different case on purpose
+await page.click('#f-addparty');
+await page.waitForTimeout(400);
+check('an existing name selects that party instead of creating a duplicate',
+  await page.evaluate((n) => {
+    const alpha = STB.store.parties.find((x) => x.name === 'Alpha Fabrics');
+    return window.HZ.server.parties.length === n &&
+      document.querySelector('#f-party').value === alpha.id &&
+      !document.querySelector('#f-newparty');
+  }, partiesBefore));
+
+// Put the form back on Alpha Fabrics for the builder section below.
+await page.selectOption('#f-party', { label: 'Alpha Fabrics' });
+
 // ------------------------------------------------------------ build a voucher
 await page.selectOption('#v-party', { label: 'Alpha Fabrics' });
 await page.waitForTimeout(150);
@@ -175,8 +224,11 @@ const figures = await page.evaluate(() => ({
   toPay: STB.ledger.totals(STB.store.bills, null).toPay,
   awaiting: STB.ledger.unallocatedInvoiceTotal(STB.store.invoices)
 }));
+// Awaiting = ₹2,500 (the other party's seeded invoice) + ₹5,000 (left unticked)
+// + ₹1,500 (entered against the newly created party). The ₹20,000 that became a
+// voucher is in toPay instead, which is the whole point of keeping them apart.
 check('vouchered money left the awaiting pool and none of it is counted twice',
-  figures.awaiting === 7500 && figures.toPay === 36300,
+  figures.awaiting === 9000 && figures.toPay === 36300,
   JSON.stringify(figures));
 
 // ------------------------------------------------- editing / locking an invoice
