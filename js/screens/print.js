@@ -7,7 +7,7 @@
    * The voucher reproduces Shayar Tex's own pre-printed debit voucher pad —
    * heading, address block, labels, dotted rules and the Rs./P. column — so it
    * prints onto blank paper and reads as the same document the shop has always
-   * used. Two fit an A4 portrait sheet; see the .dv rules in css/app.css.
+   * used. Three fit an A4 portrait sheet; see the .dv rules in css/app.css.
    *
    * Deliberately always "DEBIT VOUCHER", including for a received bill: the
    * pad has one form, and Harshit only ever hands out the debit side.
@@ -15,6 +15,10 @@
 
   // The form has three item lines between "Being the" and TOTAL.
   const ITEM_LINES = 3;
+
+  // Vouchers per printed sheet. The .dv box height in css/app.css is sized to
+  // this; changing one without the other either wastes paper or clips.
+  const PER_SHEET = 3;
 
   /** Splits an amount into whole rupees and two-digit paise for the Rs./P. column. */
   function rsP(n) {
@@ -159,12 +163,16 @@
         const ids = STB.printSelection || [];
         const bills = STB.store.bills.filter((b) => ids.includes(b.id));
         title = `${bills.length} voucher(s)`;
-        // Joined with nothing between them on purpose: the print rules pair
-        // vouchers onto a sheet with .dv:nth-of-type(2n), and nth-of-type counts
-        // elements by tag, not by class — any separator div interleaved here
-        // would shift every .dv to an odd position and the page breaks would
-        // silently never fire.
-        inner = bills.map(voucherHTML).join('');
+        // Grouped PER_SHEET to a .dv-sheet wrapper, which is what carries the
+        // page break. Doing the grouping here rather than leaving the browser
+        // to fit boxes by height is what makes the sheet count predictable
+        // across engines — WebKit in particular would not pack them.
+        const sheets = [];
+        for (let i = 0; i < bills.length; i += PER_SHEET) {
+          sheets.push('<div class="dv-sheet">' +
+            bills.slice(i, i + PER_SHEET).map(voucherHTML).join('') + '</div>');
+        }
+        inner = sheets.join('');
         if (!bills.length) inner = '<p class="hint">Nothing selected — go to Bills, tick rows, then Print vouchers.</p>';
       }
 

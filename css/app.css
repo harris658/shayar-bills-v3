@@ -107,67 +107,75 @@ table.tbl { width: 100%; border-collapse: collapse; }
    Debit voucher — a reproduction of the shop's pre-printed pad, drawn entirely
    by the app so it prints onto blank paper.
 
-   Sized in mm throughout, not px: this is a physical document, and two must sit
-   on one A4 portrait sheet. 297mm − 2×8mm margin = 281mm usable, and 2×132mm
-   plus a 6mm gap is 270mm — the slack is deliberate, because a printer that
-   reports a millimetre less usable height would otherwise push voucher two onto
-   its own page. Screen preview uses the same box, so what is on screen is what
-   comes out of the printer.
+   Sized in mm, not px: this is a physical document, and THREE must sit on one
+   A4 portrait sheet. The height budget assumes the pessimistic case where the
+   browser ignores the @page margin below and applies the printer's own ~12.7mm
+   default: 297mm − 2×12.7mm = 271.6mm usable, and 3×88mm plus two 2.5mm gaps is
+   269mm. Under the 8mm @page margin there is 12mm more slack still. Screen
+   preview uses the same box, so what is on screen is what comes out.
+
+   Everything inside the voucher is sized in em against .dv's own font-size, so
+   the whole document scales as one unit: to fit a different number per sheet,
+   change --dv-h and font-size on .dv and nothing else. The em ratios are the
+   original hand-measured mm values divided by the 3.4mm base they were drawn
+   at, which is why they are not round numbers.
 
    Labels are followed by a dotted leader that fills the rest of the line, the
    way the pad's are. That is done with a flex row: the label is fixed, the
    value is a flex item with a dotted bottom border, so the dots run from the
    end of the text to the edge no matter how long the value is.
    ------------------------------------------------------------------------- */
-.dv { width: 190mm; height: 132mm; box-sizing: border-box; background: #fff;
-  margin: 0 auto 6mm; padding: 5mm 6mm 3mm; color: #000;
-  font-family: Arial, Helvetica, sans-serif; font-size: 3.4mm; line-height: 1.35;
-  display: flex; flex-direction: column; page-break-inside: avoid; }
+.dv { --dv-h: 88mm; --dv-gap: 2.5mm;
+  width: 190mm; height: var(--dv-h); box-sizing: border-box; background: #fff;
+  margin: 0 auto var(--dv-gap); padding: 1.47em 1.76em .88em; color: #000;
+  font-family: Arial, Helvetica, sans-serif; font-size: 2.25mm; line-height: 1.35;
+  display: flex; flex-direction: column; page-break-inside: avoid;
+  break-inside: avoid; }
 .dv-head { text-align: center; }
-.dv-kind { font-size: 3.6mm; font-weight: 700; letter-spacing: .08em;
-  text-decoration: underline; text-underline-offset: 1mm; }
-.dv-brand { font-size: 8mm; font-weight: 700; letter-spacing: .02em; line-height: 1.1;
-  margin-top: .5mm; }
-.dv-sub { font-size: 3.2mm; letter-spacing: .18em; }
-.dv-addr { font-size: 3.1mm; line-height: 1.3; }
+.dv-kind { font-size: 1.06em; font-weight: 700; letter-spacing: .08em;
+  text-decoration: underline; text-underline-offset: .3em; }
+.dv-brand { font-size: 2.35em; font-weight: 700; letter-spacing: .02em; line-height: 1.1;
+  margin-top: .06em; }
+.dv-sub { font-size: .94em; letter-spacing: .18em; }
+.dv-addr { font-size: .91em; line-height: 1.3; }
 
-.dv-fields { margin-top: 2mm; }
-/* 2.2mm, not 2.6: the worst realistic voucher — a crore-scale amount whose
+.dv-fields { margin-top: .59em; }
+/* .65em, not .76em: the worst realistic voucher — a crore-scale amount whose
    words wrap to two lines, plus a note long enough to fill three narration
-   lines — overflowed the fixed 132mm box by 1.6mm at the looser spacing and
-   clipped the signature row. */
-.dv-line { display: flex; align-items: baseline; gap: 1mm; margin-bottom: 2.2mm; }
+   lines — overflowed the fixed box and clipped the signature row at the looser
+   spacing. */
+.dv-line { display: flex; align-items: baseline; gap: .29em; margin-bottom: .65em; }
 .dv-lbl { flex: none; white-space: nowrap; }
 .dv-tail { flex: none; white-space: nowrap; align-self: flex-end; }
 /* The dotted leader. min-width keeps a visible run of dots even when the value
    is long, and the value never wraps the row onto two lines. */
-.dv-val { flex: 1 1 auto; min-width: 12mm; border-bottom: 1px dotted #000;
-  padding: 0 1mm .4mm; font-weight: 700; white-space: nowrap;
+.dv-val { flex: 1 1 auto; min-width: 3.53em; border-bottom: 1px dotted #000;
+  padding: 0 .29em .12em; font-weight: 700; white-space: nowrap;
   overflow: hidden; text-overflow: ellipsis; }
 /* Never truncate the amount in words — see print.js. Wrapping grows the row,
    which the 132mm box has slack for. */
 .dv-val-wrap { white-space: normal; overflow: visible; text-overflow: clip;
   line-height: 1.25; }
-.dv-val-rs { flex: 0 1 48mm; }
-.dv-lbl-date { margin-left: 4mm; }
-.dv-val-date { flex: 0 1 42mm; }
+.dv-val-rs { flex: 0 1 14.1em; }
+.dv-lbl-date { margin-left: 1.18em; }
+.dv-val-date { flex: 0 1 12.35em; }
 .dv-lbl-on { flex: none; }
-.dv-val-on { flex: 0 1 34mm; }
+.dv-val-on { flex: 0 1 10em; }
 /* "by" sits against a two-line Cheque No./Cash stack, exactly as on the pad —
    whoever signs strikes out the one that does not apply. */
 .dv-lbl-by { align-self: flex-end; }
 .dv-stack { flex: none; display: flex; flex-direction: column; line-height: 1.15;
-  font-size: 3mm; margin-right: .5mm; }
+  font-size: .88em; margin-right: .17em; }
 .dv-stack em { font-style: normal; }
 
 /* Item block: narration on the left, Rs./P. money column on the right, TOTAL
    ruled off at the bottom. border-collapse so the column rules meet cleanly. */
-.dv-items { width: 100%; border-collapse: collapse; margin-top: 1.5mm;
+.dv-items { width: 100%; border-collapse: collapse; margin-top: .44em;
   border-top: 1px solid #000; table-layout: fixed; }
-.dv-items td, .dv-items th { padding: .7mm 1mm; vertical-align: bottom;
-  font-size: 3.4mm; height: 6.2mm; }
-.dv-items .dv-rs { width: 24mm; border-left: 1px solid #000; }
-.dv-items .dv-p { width: 12mm; border-left: 1px solid #000;
+.dv-items td, .dv-items th { padding: .21em .29em; vertical-align: bottom;
+  font-size: 1em; height: 1.82em; }
+.dv-items .dv-rs { width: 7.06em; border-left: 1px solid #000; }
+.dv-items .dv-p { width: 3.53em; border-left: 1px solid #000;
   border-right: 1px solid #000; }
 .dv-items th { font-weight: 400; text-align: center; vertical-align: top; }
 .dv-items .dv-rs, .dv-items .dv-p { text-align: right; font-weight: 700; }
@@ -182,7 +190,7 @@ table.tbl { width: 100%; border-collapse: collapse; }
 .dv-total-lbl { font-weight: 400; letter-spacing: .04em; }
 
 .dv-sign { display: flex; justify-content: space-between; margin-top: auto;
-  padding-top: 3mm; font-size: 3.1mm; }
+  padding-top: .88em; font-size: .91em; }
 
 /* Screen-only outline, so each voucher reads as a separate sheet against the
    app background and you can see where the A4 page gets cut in half. Never
@@ -190,23 +198,36 @@ table.tbl { width: 100%; border-collapse: collapse; }
 @media screen { .dv { border: 1px solid #ddd; } }
 
 @media print {
-  body * { visibility: hidden; }
-  .print-area, .print-area * { visibility: visible; }
-  .print-area { position: absolute; left: 0; top: 0; width: 100%; }
+  /* Hide the app chrome with display:none, not visibility:hidden. Hidden-but-
+     visible boxes still occupy their space, which is why this used to pull
+     .print-area out of flow with position:absolute to reach the top of the
+     sheet — and an absolutely positioned block does not fragment across pages
+     in WebKit, so Safari put one voucher on each sheet however small they were.
+     Taking the chrome out of flow entirely lets the print area stay in normal
+     flow, where page breaks work. */
+  .topbar, .toast, .no-print, #v2-file-input { display: none !important; }
+  /* The screen shell's max-width, gutters and 80px scroll tail are page
+     furniture: on paper they narrow every voucher and can push a blank sheet
+     out of the trailing padding. */
+  #screen-root { max-width: none; margin: 0; padding: 0; }
+  .print-area { width: 100%; margin: 0; }
   .voucher { border-radius: 0; margin-bottom: 10mm; }
-  .no-print { display: none !important; }
   .tbl-wrap { overflow: visible; }
 
   @page { size: A4 portrait; margin: 8mm; }
   /* The app's dark page background must not band the sheet on a printer (or in
      a PDF export) that has "print backgrounds" switched on. */
   html, body { background: #fff !important; }
+  body { padding: 0; margin: 0; }
   /* Full printable width — the on-screen 190mm box plus its auto margins would
      otherwise sit off-centre once the printer's own margin is applied. */
-  .dv { width: 100%; margin: 0 0 4mm; border: 0; }
-  /* Two per sheet. Breaking after every second voucher (rather than trusting
-     the browser to work it out from the heights) keeps the pairing exact when
-     the printer's usable height differs by a millimetre or two. */
-  .dv:nth-of-type(2n) { page-break-after: always; }
-  .dv:last-of-type { page-break-after: auto; }
+  .dv { width: 100%; margin: 0 0 var(--dv-gap); border: 0; }
+  /* Three per sheet. print.js wraps each group of three in a .dv-sheet and the
+     break goes on the wrapper, so pagination does not depend on the browser
+     adding up voucher heights, nor on an nth-of-type count that any stray
+     element in the print area would shift. The last voucher on a sheet drops
+     its bottom gap so a fractional millimetre cannot spill onto a blank page. */
+  .dv-sheet { page-break-after: always; break-after: page; }
+  .dv-sheet:last-child { page-break-after: auto; break-after: auto; }
+  .dv-sheet > .dv:last-child { margin-bottom: 0; }
 }
