@@ -25,6 +25,11 @@
   // validation double as a migration mechanism, and the next person to relax
   // the check would silently resurrect stale caches with no invoices in them.
   const KEY = 'stb.snapshot.v2';
+  // Superseded keys. Bumping the key orphans the old blob rather than replacing
+  // it, so a whole stale ledger — real party names and amounts — would sit in
+  // localStorage on every device forever, counting against the same quota this
+  // cache has to fit inside. Cleared once, on load.
+  const DEAD_KEYS = ['stb.snapshot.v1'];
 
   // Same seam auth.js uses, so tests can swap storage between cases.
   function storage() {
@@ -92,6 +97,15 @@
       try {
         storage().removeItem(KEY);
       } catch (e) { /* nothing to clean up */ }
+    },
+
+    /** Drops blobs written by an older cache format. Never fatal. */
+    dropDeadKeys() {
+      DEAD_KEYS.forEach((k) => {
+        try { storage().removeItem(k); } catch (e) { /* storage unavailable */ }
+      });
     }
   };
+
+  STB.cache.dropDeadKeys();
 })();

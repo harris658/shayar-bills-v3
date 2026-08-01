@@ -119,3 +119,19 @@ test('at survives the round trip so staleness can be judged', () => {
   const { at } = C.read('a@b.com');
   assert.ok(at >= before && at <= Date.now());
 });
+
+test('a superseded v1 blob is dropped, not left sitting in storage', () => {
+  reset();
+  // Real party names and amounts would otherwise stay on every device forever,
+  // counting against the quota this cache has to fit inside.
+  store.setItem('stb.snapshot.v1', JSON.stringify({ email: 'a@b.com', parties, bills }));
+  C.dropDeadKeys();
+  assert.equal(store.getItem('stb.snapshot.v1'), null);
+});
+
+test('dropping dead keys leaves the live snapshot alone', () => {
+  reset();
+  C.write('a@b.com', parties, bills, invoices);
+  C.dropDeadKeys();
+  assert.deepEqual(C.read('a@b.com').bills, bills);
+});
