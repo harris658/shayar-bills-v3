@@ -9,6 +9,58 @@
   // changes) within a visit. Cleared once "Print vouchers" hands off.
   const selected = new Set();
 
+  /**
+   * True for a voucher built from invoices. Blank on every bill entered by hand
+   * and on every row that predates the invoice feature, which is exactly the
+   * distinction wanted — those keep the plain amount edit.
+   */
+  function isVoucher(b) {
+    return b && b.invoice_total !== undefined &&
+      String(b.invoice_total).trim() !== '';
+  }
+
+  /**
+   * Records what the bank actually debited after Avinash deducted a discount or
+   * an adjustment on the printed voucher.
+   *
+   * Only the amount is asked for. What was deducted is derived from the
+   * invoices' own total server-side, so the voucher ends up holding all three
+   * figures — billed, deducted, paid — without anyone typing the middle one.
+   * The breakdown is deliberately not touched: it describes the invoices
+   * underneath, which the deduction did not change.
+   */
+  function adjustVoucher(b) {
+    const U = STB.util;
+    const billed = Number(b.invoice_total);
+    const raw = prompt(
+      'Amount actually paid for ' + ((STB.partyById(b.party_id) || {}).name || '') +
+      '\nInvoices total ' + U.money(billed) + ' — enter what the bank debited:',
+      String(b.amount)
+    );
+    if (raw === null) return;
+    const v = U.safeEval(raw.trim());
+    if (Number.isNaN(v)) { STB.toast('Could not read that amount'); return; }
+    const amt = Math.round(v * 100) / 100;
+    if (!(amt > 0)) { STB.toast('Amount must be more than 0'); return; }
+    if (amt === Number(b.amount)) return;
+
+    const before = { amount: b.amount, adjustment: b.adjustment };
+    b.amount = amt;
+    b.adjustment = Math.round((billed - amt) * 100) / 100;
+    STB.toast(b.adjustment > 0
+      ? 'Paid ' + U.money(amt) + ' — ' + U.money(b.adjustment) + ' deducted ✓'
+      : 'Amount updated ✓');
+    STB.commitStore();
+
+    STB.db.adjustVoucherAmount(b.id, amt).catch((e) => {
+      console.error('adjustVoucherAmount failed', e);
+      const cur = STB.store.bills.find((x) => x.id === b.id);
+      if (cur) Object.assign(cur, before);
+      STB.toast('Could not update — ' + (e.message || 'reverted'));
+      STB.commitStore();
+    });
+  }
+
   STB.screens.bills = {
     render(root) {
       const U = STB.util;
@@ -39,6 +91,14 @@
         const p = STB.partyById(b.party_id);
         const sign = b.type === 'received' ? '+' : '−';
         const cls = b.type === 'received' ? 'text-pos' : 'text-neg';
+        // What the invoices came to, when that is not what was paid. Shown on
+        // the row rather than behind a click: a deduction is the one thing
+        // about a settled voucher anyone goes looking for later.
+        const adj = Number(b.adjustment) || 0;
+        const adjHint = isVoucher(b) && adj !== 0
+          ? `<div class="hint">${U.money(b.invoice_total)} ${
+            adj > 0 ? 'less' : 'plus'} ${U.money(Math.abs(adj))}</div>`
+          : '';
         return `
         <tr data-id="${b.id}">
           <td class="col-sel"><label class="sel-box">
@@ -47,7 +107,7 @@
           <td>${U.fmtDate(b.bill_date)}</td>
           <td><a href="#/party/${b.party_id}">${U.escapeHTML(p ? p.name : '?')}</a></td>
           <td>${U.escapeHTML(b.note || '')}</td>
-          <td class="num ${cls}">${sign}${U.money(b.amount)}</td>
+          <td class="num ${cls}">${sign}${U.money(b.amount)}${adjHint}</td>
           <td>${b.status === 'paid'
             ? `<span class="badge paid">Paid</span> <span class="hint">${U.escapeHTML(b.payment_ref || '')}</span>`
             : `<span class="badge pending">Pending</span>
@@ -198,6 +258,12 @@
         const b = STB.store.bills.find((x) => x.id === id);
         if (!b) { STB.toast('Bill no longer exists'); return; }
         if (b.status === 'paid') { STB.toast('Already paid — delete and re-enter instead'); return; }
+
+        // A voucher built from invoices takes a different edit entirely: its
+        // amount is the figure the bank debited after Avinash's deduction, and
+        // its breakdown belongs to the invoices underneath it, which this must
+        // not touch. See adjustVoucher below.
+        if (isVoucher(b)) { adjustVoucher(b); return; }
 
         // Seed with the typed breakdown when there is one, so "1200+850" comes
         // back editable as "1200+850" rather than as 2050.

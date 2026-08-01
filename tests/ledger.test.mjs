@@ -34,3 +34,29 @@ test('buildLedger running balance chronological', () => {
   assert.equal(rows[0].delta, -1000);
   assert.equal(rows[1].running, -1500);
 });
+
+test('unallocatedInvoiceTotal counts only invoices not yet on a voucher', () => {
+  const invoices = [
+    { id: 'i1', amount: 10, status: 'unallocated' },
+    { id: 'i2', amount: 20, status: 'allocated' },   // already spent on a voucher
+    { id: 'i3', amount: 30, status: 'unallocated' }
+  ];
+  assert.equal(L.unallocatedInvoiceTotal(invoices), 40);
+});
+
+test('unallocatedInvoiceTotal is 0 for an empty or missing pool', () => {
+  assert.equal(L.unallocatedInvoiceTotal([]), 0);
+  assert.equal(L.unallocatedInvoiceTotal(undefined), 0);
+});
+
+test('the two dashboard figures never count the same money twice', () => {
+  // An invoice leaves the unallocated pool at the moment its voucher joins
+  // "to pay" — the sums read different arrays, so nothing can be in both.
+  const invoices = [
+    { id: 'i1', amount: 300, status: 'allocated', bill_id: 'v1' },
+    { id: 'i2', amount: 700, status: 'unallocated' }
+  ];
+  const voucher = [{ id: 'v1', type: 'paid', status: 'pending', amount: 300 }];
+  assert.equal(L.unallocatedInvoiceTotal(invoices), 700);
+  assert.equal(L.totals(voucher, null).toPay, 300);
+});

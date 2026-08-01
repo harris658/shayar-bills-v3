@@ -45,9 +45,17 @@ with it.
 | Tab | Columns (A → …), in order |
 | --- | --- |
 | `parties` | id, name, phone, notes, created_at |
-| `bills` | id, party_id, type, amount, bill_date, note, amount_expr, status, payment_ref, payment_date, created_by, created_at |
+| `bills` | id, party_id, type, amount, bill_date, note, amount_expr, status, payment_ref, payment_date, created_by, created_at, invoice_total, adjustment, invoice_ids |
+| `invoices` | id, party_id, invoice_no, amount, invoice_date, note, status, bill_id, created_by, created_at |
 | `bank_txns` | id, txn_date, amount, ref, description, matched_bill_id, imported_at |
 | `allowed_users` | email, name, active |
+
+`invoices` holds GRC PIs as they are raised, before anyone knows which will be
+paid. `status` is `unallocated` until some of them are turned into one debit
+voucher, at which point each carries the `bill_id` of that voucher and the
+voucher carries their ids in `invoice_ids`. The last three `bills` columns are
+blank on every row that predates the feature and on every bill entered by hand —
+that blank *is* the "not invoice-derived" state, and nothing backfills it.
 
 `allowed_users` is the one tab `scripts/backup-to-sheet.mjs` does not touch —
 it's maintained by hand, one row per person, `active` set to `TRUE`/`FALSE`.
@@ -92,6 +100,7 @@ text, before any data goes in):
   whole statement re-imports.
 - `bills!I` (payment_ref) — otherwise a UTR like `007123456` loses its
   leading zeros and prints wrong on the voucher.
+- `invoices!E` (invoice_date) — same risk as `bill_date`.
 
 ## OAuth client ID
 

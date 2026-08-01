@@ -156,3 +156,70 @@ test('an unrenewable session rejects without hitting the network', async () => {
   assert.equal(calls.length, 0);
   STB.auth.ensureFresh = saved;
 });
+
+test('createInvoice sends the invoice under its own key', async () => {
+  reset({ ok: true, data: { id: 'i1' } });
+  const invoice = {
+    party_id: 'p1', invoice_no: 'JFPS26-27-000168',
+    amount: 1200, invoice_date: '2026-07-29', note: ''
+  };
+  await db.createInvoice(invoice);
+  const sent = JSON.parse(calls[0].opts.body);
+  assert.equal(sent.action, 'createInvoice');
+  assert.deepEqual(sent.args, { invoice });
+});
+
+test('updateInvoice sends only the patched fields', async () => {
+  reset({ ok: true, data: { ok: true } });
+  await db.updateInvoice('i1', { amount: 99 });
+  const sent = JSON.parse(calls[0].opts.body);
+  assert.equal(sent.action, 'updateInvoice');
+  assert.deepEqual(sent.args, { id: 'i1', patch: { amount: 99 } });
+});
+
+test('deleteInvoice sends the id', async () => {
+  reset({ ok: true, data: { ok: true } });
+  await db.deleteInvoice('i1');
+  const sent = JSON.parse(calls[0].opts.body);
+  assert.equal(sent.action, 'deleteInvoice');
+  assert.deepEqual(sent.args, { id: 'i1' });
+});
+
+test('createVoucherFromInvoices sends no amount at all', async () => {
+  reset({ ok: true, data: { id: 'b9', amount: 30 } });
+  await db.createVoucherFromInvoices('p1', ['i1', 'i2', 'i3'], '2026-08-01');
+  const sent = JSON.parse(calls[0].opts.body);
+  assert.equal(sent.action, 'createVoucherFromInvoices');
+  assert.deepEqual(sent.args, {
+    party_id: 'p1', invoice_ids: ['i1', 'i2', 'i3'], bill_date: '2026-08-01'
+  });
+  // The server totals the invoice rows itself. Sending a client-computed
+  // amount would let a stale tab voucher a selection for the wrong figure.
+  assert.equal('amount' in sent.args, false);
+  assert.equal('note' in sent.args, false);
+});
+
+test('createVoucherFromInvoices defaults a missing selection to empty', async () => {
+  reset({ ok: false, error: 'select at least one invoice' });
+  await assert.rejects(
+    db.createVoucherFromInvoices('p1', undefined, ''),
+    /select at least one invoice/
+  );
+  assert.deepEqual(JSON.parse(calls[0].opts.body).args.invoice_ids, []);
+});
+
+test('adjustVoucherAmount sends the paid figure and never the deduction', async () => {
+  reset({ ok: true, data: { ok: true, amount: 29500, adjustment: 500 } });
+  const out = await db.adjustVoucherAmount('b9', 29500);
+  const sent = JSON.parse(calls[0].opts.body);
+  assert.equal(sent.action, 'adjustVoucherAmount');
+  assert.deepEqual(sent.args, { id: 'b9', amount: 29500 });
+  // adjustment is derived from invoice_total server-side, never sent.
+  assert.equal('adjustment' in sent.args, false);
+  assert.equal(out.adjustment, 500);
+});
+
+test("the server's refusal to edit a spent invoice surfaces as a throw", async () => {
+  reset({ ok: false, error: 'invoice is on a voucher — delete the voucher to free it' });
+  await assert.rejects(db.updateInvoice('i1', { amount: 5 }), /on a voucher/);
+});

@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Shayar Tex — Bills</title>
-  <link rel="stylesheet" href="css/app.css?v=print3">
+  <link rel="stylesheet" href="css/app.css?v=inv">
 </head>
 <body>
   <header class="topbar" id="topbar" hidden>
@@ -13,6 +13,7 @@
       <a href="#/dashboard" data-nav="dashboard">Dashboard</a>
       <a href="#/new" data-nav="new">New Bill</a>
       <a href="#/bills" data-nav="bills">Bills</a>
+      <a href="#/invoices" data-nav="invoices">Invoices</a>
       <a href="#/parties" data-nav="parties">Parties</a>
       <a href="#/import" data-nav="import">Import</a>
       <a href="#/more" data-nav="more">More</a>
@@ -27,20 +28,22 @@
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <script src="js/config.js?v=sheets"></script>
   <script src="js/lib/util.js"></script>
-  <script src="js/lib/ledger.js"></script>
+  <script src="js/lib/ledger.js?v=inv"></script>
+  <script src="js/lib/voucher.js?v=inv"></script>
   <script src="js/lib/statement.js?v=cdaf91e"></script>
   <script src="js/lib/matching.js"></script>
   <script src="js/lib/auth.js?v=sheets"></script>
-  <script src="js/lib/cache.js?v=perf"></script>
-  <script src="js/lib/db.js?v=edit"></script>
+  <script src="js/lib/cache.js?v=inv"></script>
+  <script src="js/lib/db.js?v=inv"></script>
   <script src="js/screens/login.js?v=sheets"></script>
   <script src="js/screens/entry.js?v=perf"></script>
-  <script src="js/screens/bills.js?v=edit"></script>
-  <script src="js/screens/dashboard.js"></script>
+  <script src="js/screens/bills.js?v=inv"></script>
+  <script src="js/screens/invoices.js?v=inv"></script>
+  <script src="js/screens/dashboard.js?v=inv"></script>
   <script src="js/screens/party.js"></script>
   <script src="js/screens/import.js"></script>
   <script src="js/screens/print.js?v=print3"></script>
-  <script src="js/screens/more.js?v=delall"></script>
-  <script src="js/app.js?v=perf"></script>
+  <script src="js/screens/more.js?v=inv"></script>
+  <script src="js/app.js?v=inv"></script>
 </body>
 </html>

@@ -14,9 +14,12 @@ import { join } from 'node:path';
 const HEADERS = {
   parties: ['id', 'name', 'phone', 'notes', 'created_at'],
   bills: ['id', 'party_id', 'type', 'amount', 'bill_date', 'note', 'amount_expr',
-    'status', 'payment_ref', 'payment_date', 'created_by', 'created_at'],
+    'status', 'payment_ref', 'payment_date', 'created_by', 'created_at',
+    'invoice_total', 'adjustment', 'invoice_ids'],
   bank_txns: ['id', 'txn_date', 'amount', 'ref', 'description', 'matched_bill_id',
-    'imported_at']
+    'imported_at'],
+  invoices: ['id', 'party_id', 'invoice_no', 'amount', 'invoice_date', 'note',
+    'status', 'bill_id', 'created_by', 'created_at']
 };
 
 function cell(v) {

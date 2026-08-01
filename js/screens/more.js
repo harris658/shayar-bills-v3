@@ -120,7 +120,7 @@
         if (delBtn.disabled) return;
         const n = STB.store.bills.length;
         if (!n) { STB.toast('No bills to delete'); return; }
-        if (!confirm(`Delete ALL ${n} bill(s) — pending AND paid — plus every imported bank transaction? Parties are kept. This cannot be undone.`)) return;
+        if (!confirm(`Delete ALL ${n} bill(s) — pending AND paid — plus every imported bank transaction? Parties are kept. Invoices are kept too and go back to awaiting a voucher. This cannot be undone.`)) return;
         if (prompt('Type DELETE to confirm:') !== 'DELETE') { STB.toast('Cancelled — nothing deleted'); return; }
         delBtn.disabled = true;
         try {

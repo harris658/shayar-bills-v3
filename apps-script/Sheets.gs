@@ -35,7 +35,7 @@ function isoDate_(v) {
   return String(v == null ? '' : v).trim();
 }
 
-const DATE_FIELDS_ = ['bill_date', 'payment_date', 'txn_date'];
+const DATE_FIELDS_ = ['bill_date', 'payment_date', 'txn_date', 'invoice_date'];
 
 function rowToObj_(t, row) {
   const o = {};
@@ -77,7 +77,7 @@ function objToRow_(t, obj) {
  * amounts must stay numeric.
  */
 function textFields_() {
-  return ['bill_date', 'payment_date', 'txn_date', 'ref', 'payment_ref'];
+  return ['bill_date', 'payment_date', 'txn_date', 'ref', 'payment_ref', 'invoice_date'];
 }
 
 /** Forces plain text on every textFields_() column across `rowCount` rows from `startRow`. */

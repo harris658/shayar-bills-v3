@@ -20,9 +20,11 @@ function dispatch_(action, args, user) {
     case 'ping': return { pong: true, email: user.email };
 
     // Reads — no lock.
-    case 'snapshot': return { parties: listParties_(), bills: listBills_() };
+    case 'snapshot':
+      return { parties: listParties_(), bills: listBills_(), invoices: listInvoices_() };
     case 'listParties': return listParties_();
     case 'listBills': return listBills_();
+    case 'listInvoices': return listInvoices_();
     case 'listBankTxns': return readAll_('bank_txns');
 
     // Writes — all serialised.
@@ -40,6 +42,18 @@ function dispatch_(action, args, user) {
       });
     case 'deleteBill':
       return withLock_(function () { return deleteBill_(args.id); });
+    case 'createInvoice':
+      return withLock_(function () { return createInvoice_(args.invoice, user); });
+    case 'updateInvoice':
+      return withLock_(function () { return updateInvoice_(args.id, args.patch); });
+    case 'deleteInvoice':
+      return withLock_(function () { return deleteInvoice_(args.id); });
+    case 'createVoucherFromInvoices':
+      return withLock_(function () {
+        return createVoucherFromInvoices_(args.party_id, args.invoice_ids, args.bill_date, user);
+      });
+    case 'adjustVoucherAmount':
+      return withLock_(function () { return adjustVoucherAmount_(args.id, args.amount); });
     case 'deleteAllBills':
       return withLock_(function () { return deleteAllBills_(); });
     case 'applyImport':
@@ -61,6 +75,14 @@ function listParties_() {
 function listBills_() {
   return readAll_('bills').sort(function (a, b) {
     if (a.bill_date !== b.bill_date) return a.bill_date < b.bill_date ? 1 : -1;
+    return String(a.created_at) < String(b.created_at) ? 1 : -1;
+  });
+}
+
+/** Newest first, same convention as listBills_. */
+function listInvoices_() {
+  return readAll_('invoices').sort(function (a, b) {
+    if (a.invoice_date !== b.invoice_date) return a.invoice_date < b.invoice_date ? 1 : -1;
     return String(a.created_at) < String(b.created_at) ? 1 : -1;
   });
 }
@@ -163,21 +185,310 @@ function updateBillAmount_(id, amount, amountExpr) {
   return { ok: true, id: String(id), amount: amt, amount_expr: String(amountExpr || '') };
 }
 
+/**
+ * Deleting a voucher frees the invoices it consumed, so they can go onto the
+ * next one.
+ *
+ * The row is deleted BEFORE the invoices are released, and the order is
+ * load-bearing. Released-then-failed would leave invoices marked unallocated
+ * while the voucher that already claimed them still exists — they could be
+ * vouchered a second time, and the shop would pay twice. Deleted-then-failed
+ * leaves invoices pointing at a voucher that is gone: visible, harmless, and
+ * fixable, because nothing can spend them again while they read as allocated.
+ */
 function deleteBill_(id) {
   const t = table_('bills');
   const rowNum = findRow_(t, id);
   if (rowNum < 0) throw new Error('bill not found');
+  const row = t.rows[rowNum - 2]; // -1 header, -1 back to zero-based
+  const ids = t.index.invoice_ids === undefined
+    ? [] : splitIds_(row[t.index.invoice_ids]);
+
+  t.sheet.deleteRow(rowNum);
+  if (ids.length) releaseInvoices_(ids);
+  return { ok: true };
+}
+
+/** "a,b,c" -> ['a','b','c']; blank -> []. Tolerates spaces and trailing commas. */
+function splitIds_(v) {
+  return String(v == null ? '' : v)
+    .split(',')
+    .map(function (s) { return s.trim(); })
+    .filter(function (s) { return s.length > 0; });
+}
+
+/** Marks the given invoices unallocated. Ignores ids that no longer exist. */
+function releaseInvoices_(ids) {
+  const t = table_('invoices');
+  const patches = [];
+  ids.forEach(function (id) {
+    const rowNum = findRow_(t, id);
+    if (rowNum > 0) {
+      patches.push({ rowNum: rowNum, patch: { status: 'unallocated', bill_id: '' } });
+    }
+  });
+  setCellsBatch_(t, patches);
+}
+
+/* ---------------------------------------------------------------------------
+   Invoices (GRC PIs)
+
+   Recorded by hand when the invoice is raised in the ERP, long before anyone
+   knows whether it will be paid this month. Later some of them are selected
+   and become one debit voucher — a `bills` row — which is why an invoice is a
+   separate record rather than a line typed into the voucher: it exists first,
+   and only some of them are ever spent.
+   ------------------------------------------------------------------------- */
+
+/** Money is summed in integer paise — 0.1 + 0.2 on rupees puts 71 in the paise column. */
+function toPaise_(v) {
+  return Math.round(Number(v) * 100);
+}
+
+function partyExists_(partyId) {
+  const t = table_('parties');
+  return findRow_(t, partyId) > 0;
+}
+
+function createInvoice_(inv, user) {
+  if (!inv) throw new Error('invoice required');
+  const partyId = String(inv.party_id || '').trim();
+  if (!partyId) throw new Error('party_id required');
+  // Checked, unlike createBill_: an invoice whose party does not exist would be
+  // invisible in the voucher builder, which lists strictly by party.
+  if (!partyExists_(partyId)) throw new Error('party not found');
+  const amount = Number(inv.amount);
+  if (!(amount > 0)) throw new Error('amount must be greater than zero');
+  const invoiceNo = String(inv.invoice_no || '').trim();
+  if (!invoiceNo) throw new Error('invoice number required');
+  const invoiceDate = isoDate_(inv.invoice_date);
+  if (!invoiceDate) throw new Error('invoice date required');
+
+  // Deliberately no duplicate invoice_no check. The numbers come from another
+  // system this app cannot see, and refusing a legitimate re-entry over a
+  // suspected duplicate is worse than an accidental one Hussain can delete.
+  const row = {
+    id: Utilities.getUuid(),
+    party_id: partyId,
+    invoice_no: invoiceNo,
+    amount: amount,
+    invoice_date: invoiceDate,
+    note: String(inv.note || ''),
+    status: 'unallocated',
+    bill_id: '',
+    created_by: user.email,
+    created_at: nowIso_()
+  };
+  appendRowSafe_(table_('invoices'), row);
+  return row;
+}
+
+/**
+ * Corrects a mis-entered invoice — everything is editable, unlike a bill,
+ * because an invoice is a transcription of a document that exists elsewhere and
+ * a typo in it means nothing more than a typo.
+ *
+ * Refused once the invoice is on a voucher: that voucher's amount, narration
+ * and printed item lines were derived from these values, and editing underneath
+ * it would leave a signed document that no longer matches its own source rows.
+ */
+function updateInvoice_(id, patch) {
+  const t = table_('invoices');
+  const rowNum = findRow_(t, id);
+  if (rowNum < 0) throw new Error('invoice not found');
+  const row = t.rows[rowNum - 2];
+  if (isAllocated_(t, row)) {
+    throw new Error('invoice is on a voucher — delete the voucher to free it');
+  }
+  patch = patch || {};
+  const clean = {};
+  if (patch.invoice_no !== undefined) {
+    const n = String(patch.invoice_no).trim();
+    if (!n) throw new Error('invoice number required');
+    clean.invoice_no = n;
+  }
+  if (patch.amount !== undefined) {
+    const a = Number(patch.amount);
+    if (!(a > 0)) throw new Error('amount must be greater than zero');
+    clean.amount = a;
+  }
+  if (patch.invoice_date !== undefined) {
+    const d = isoDate_(patch.invoice_date);
+    if (!d) throw new Error('invoice date required');
+    clean.invoice_date = d;
+  }
+  if (patch.note !== undefined) clean.note = String(patch.note);
+  // party_id and status are not patchable: moving an invoice to another party
+  // is a different invoice, and status is owned by the voucher lifecycle.
+  if (!Object.keys(clean).length) throw new Error('nothing to update');
+  setCells_(t, rowNum, clean);
+  return Object.assign({ ok: true, id: String(id) }, clean);
+}
+
+function deleteInvoice_(id) {
+  const t = table_('invoices');
+  const rowNum = findRow_(t, id);
+  if (rowNum < 0) throw new Error('invoice not found');
+  if (isAllocated_(t, t.rows[rowNum - 2])) {
+    throw new Error('invoice is on a voucher — delete the voucher to free it');
+  }
   t.sheet.deleteRow(rowNum);
   return { ok: true };
+}
+
+function isAllocated_(t, row) {
+  return String(row[t.index.status]).trim().toLowerCase() === 'allocated';
+}
+
+/** Prefix on the printed narration, matching what was written on the pad by hand. */
+const NARRATION_PREFIX_ = 'INVOICE NO.- ';
+
+/**
+ * Turns a selection of invoices into one debit voucher.
+ *
+ * Everything that matters is computed here rather than accepted from the
+ * client: the total, the narration and the printed breakdown. The client's own
+ * arithmetic is a preview, nothing more — a stale tab could otherwise voucher
+ * ₹30,000 worth of invoices for ₹20,000 and the paperwork would be internally
+ * consistent while being wrong.
+ *
+ * All-or-nothing by design. One bad id — already spent, wrong party, deleted
+ * out from under the tab — aborts the whole call before a single write, so two
+ * people building vouchers at the same time can never half-spend a selection.
+ */
+function createVoucherFromInvoices_(partyId, invoiceIds, billDate, user) {
+  const party = String(partyId || '').trim();
+  if (!party) throw new Error('party_id required');
+
+  // Deduped: the same id twice in one payload would otherwise be counted twice
+  // in the total while being allocated once.
+  const ids = [];
+  (invoiceIds || []).forEach(function (raw) {
+    const id = String(raw).trim();
+    if (id && ids.indexOf(id) < 0) ids.push(id);
+  });
+  if (!ids.length) throw new Error('select at least one invoice');
+
+  const invT = table_('invoices');
+  const picked = [];
+  ids.forEach(function (id) {
+    const rowNum = findRow_(invT, id);
+    if (rowNum < 0) throw new Error('invoice not found: ' + id);
+    const row = invT.rows[rowNum - 2];
+    if (isAllocated_(invT, row)) {
+      throw new Error('invoice is already on a voucher: ' +
+        String(row[invT.index.invoice_no]));
+    }
+    if (String(row[invT.index.party_id]).trim() !== party) {
+      throw new Error('invoice belongs to a different party: ' +
+        String(row[invT.index.invoice_no]));
+    }
+    picked.push({
+      id: id,
+      rowNum: rowNum,
+      invoice_no: String(row[invT.index.invoice_no]),
+      amount: Number(row[invT.index.amount])
+    });
+  });
+
+  let paise = 0;
+  picked.forEach(function (p) {
+    if (!(p.amount > 0)) throw new Error('invoice has no amount: ' + p.invoice_no);
+    paise += toPaise_(p.amount);
+  });
+  const total = paise / 100;
+
+  // amount_expr is what print.js turns into the voucher's Rs./P. item lines. It
+  // only itemises a plain '+' chain of at most three terms; a single invoice or
+  // more than three prints the TOTAL alone, which is how the pad is filled in by
+  // hand in exactly those cases. Storing '' for one invoice matches what the
+  // manual entry form stores for a bare amount.
+  const expr = picked.length > 1
+    ? picked.map(function (p) { return String(p.amount); }).join('+')
+    : '';
+
+  const bill = {
+    id: Utilities.getUuid(),
+    party_id: party,
+    type: 'paid',
+    amount: total,
+    bill_date: isoDate_(billDate),
+    note: NARRATION_PREFIX_ + picked.map(function (p) { return p.invoice_no; }).join(', '),
+    amount_expr: expr,
+    status: 'pending',
+    payment_ref: '',
+    payment_date: '',
+    created_by: user.email,
+    created_at: nowIso_(),
+    invoice_total: total,
+    adjustment: 0,
+    invoice_ids: ids.join(',')
+  };
+  appendRowSafe_(table_('bills'), bill);
+
+  setCellsBatch_(invT, picked.map(function (p) {
+    return { rowNum: p.rowNum, patch: { status: 'allocated', bill_id: bill.id } };
+  }));
+
+  return bill;
+}
+
+/**
+ * Records what was actually paid after Avinash deducts a discount or an
+ * adjustment on the printed voucher.
+ *
+ * Separate from updateBillAmount_ rather than a flag on it. That call rewrites
+ * amount_expr as well, so routing an adjustment through it would mean the
+ * client resending the breakdown it did not change — and a client that sends ''
+ * would silently wipe the itemisation off a voucher that has already been
+ * printed and signed. This one touches amount and adjustment, nothing else.
+ *
+ * `adjustment` is derived, never sent: Hussain types only the figure the bank
+ * debited, and what was deducted falls out of invoice_total − amount. Negative
+ * is legal — charges added on top are an adjustment too.
+ */
+function adjustVoucherAmount_(id, amount) {
+  const amt = Number(amount);
+  if (!(amt > 0)) throw new Error('amount must be greater than zero');
+  const t = table_('bills');
+  const rowNum = findRow_(t, id);
+  if (rowNum < 0) throw new Error('bill not found');
+  const row = t.rows[rowNum - 2];
+  if (String(row[t.index.status]).trim().toLowerCase() === 'paid') {
+    throw new Error('bill is already marked paid — delete and re-enter it');
+  }
+  const rawTotal = t.index.invoice_total === undefined ? '' : row[t.index.invoice_total];
+  if (String(rawTotal).trim() === '') {
+    throw new Error('not an invoice-derived voucher — edit its amount instead');
+  }
+  const adjustment = (toPaise_(rawTotal) - toPaise_(amt)) / 100;
+  setCells_(t, rowNum, { amount: amt, adjustment: adjustment });
+  return { ok: true, id: String(id), amount: amt, adjustment: adjustment };
 }
 
 /**
  * Wipes bills AND imported bank txns. The txns reference bills and, kept
  * alone, would dedupe-block re-importing old statements. Parties stay.
+ *
+ * Invoices are kept too, but every one of them is released back to the
+ * unallocated pool: the vouchers that spent them no longer exist, and an
+ * invoice left pointing at a deleted bill could never be vouchered again. They
+ * are not deleted because the confirmation the user answers promises bills and
+ * bank transactions, and destroying a pool of hand-entered invoices nobody was
+ * warned about is not a thing to do quietly.
  */
 function deleteAllBills_() {
   clearRows_('bank_txns');
   clearRows_('bills');
+  const invT = table_('invoices');
+  const patches = [];
+  // Row number comes from the unfiltered index — filtering first and using the
+  // survivor's position would patch the wrong rows the moment a blank row exists.
+  invT.rows.forEach(function (r, i) {
+    if (!String(r[invT.index.id] || '').length) return;
+    patches.push({ rowNum: i + 2, patch: { status: 'unallocated', bill_id: '' } });
+  });
+  setCellsBatch_(invT, patches);
   return { ok: true };
 }
 

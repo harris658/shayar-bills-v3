@@ -72,6 +72,7 @@
     snapshot() { return rpc('snapshot'); },
     listParties() { return rpc('listParties'); },
     listBills() { return rpc('listBills'); },
+    listInvoices() { return rpc('listInvoices'); },
     listBankTxns() { return rpc('listBankTxns'); },
 
     // --- writes ---
@@ -91,6 +92,28 @@
       });
     },
     deleteBill(id) { return rpc('deleteBill', { id: id }); },
+
+    // --- invoices (GRC PIs) ---
+    createInvoice(invoice) { return rpc('createInvoice', { invoice: invoice }); },
+    // Refused by the server once the invoice is on a voucher.
+    updateInvoice(id, patch) { return rpc('updateInvoice', { id: id, patch: patch }); },
+    deleteInvoice(id) { return rpc('deleteInvoice', { id: id }); },
+
+    /**
+     * Turns a selection of invoices into one debit voucher. The total, the
+     * narration and the printed breakdown are all computed server-side — this
+     * call deliberately sends no amount, so a stale tab cannot voucher a
+     * selection for the wrong figure.
+     */
+    createVoucherFromInvoices(partyId, invoiceIds, billDate) {
+      return rpc('createVoucherFromInvoices', {
+        party_id: partyId, invoice_ids: invoiceIds || [], bill_date: billDate || ''
+      });
+    },
+    // Records what the bank actually debited; the deduction is derived server-side.
+    adjustVoucherAmount(id, amount) {
+      return rpc('adjustVoucherAmount', { id: id, amount: amount });
+    },
 
     // Wipes bills AND imported bank txns. The txns reference bills and, kept
     // alone, would dedupe-block re-importing old statements. Parties stay.

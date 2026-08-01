@@ -19,6 +19,8 @@
           <div class="stat-row">
             <div class="card stat"><div class="hint">To pay (pending)</div>
               <div class="stat-num">—</div></div>
+            <div class="card stat"><div class="hint">Awaiting voucher</div>
+              <div class="stat-num">—</div></div>
             <div class="card stat"><div class="hint">To receive (pending)</div>
               <div class="stat-num">—</div></div>
             <div class="card stat"><div class="hint">Paid this month</div>
@@ -41,6 +43,7 @@
       const bills = STB.store.bills;
       const month = U.todayStr().slice(0, 7);
       const t = STB.ledger.totals(bills, month);
+      const awaiting = STB.ledger.unallocatedInvoiceTotal(STB.store.invoices);
       const out = STB.ledger.outstandingByParty(bills);
       const recent = bills.slice(0, 8);
 
@@ -69,6 +72,13 @@
         <div class="stat-row">
           <div class="card stat"><div class="hint">To pay (pending)</div>
             <div class="stat-num text-neg">${U.money(t.toPay)}</div></div>
+          <!-- Entered but not yet on a voucher. Kept out of "To pay" on
+               purpose: that figure means what Avinash has decided to pay and
+               Hussain has vouchered, and folding a month of unscheduled
+               invoices into it would change what the number has always meant. -->
+          <div class="card stat"><div class="hint">Awaiting voucher</div>
+            <div class="stat-num">${U.money(awaiting)}</div>
+            <a class="hint" href="#/invoices">Build a voucher →</a></div>
           <div class="card stat"><div class="hint">To receive (pending)</div>
             <div class="stat-num text-pos">${U.money(t.toReceive)}</div></div>
           <div class="card stat"><div class="hint">Paid this month</div>

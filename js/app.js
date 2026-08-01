@@ -14,7 +14,7 @@
     toastTimer = setTimeout(() => { t.hidden = true; }, 2200);
   };
 
-  STB.store = { parties: [], bills: [], loaded: false };
+  STB.store = { parties: [], bills: [], invoices: [], loaded: false };
   STB.partyById = (id) => STB.store.parties.find((p) => p.id === id);
 
   // Id prefix for a bill shown optimistically but not yet acknowledged by the
@@ -37,7 +37,9 @@
    */
   STB.persistStore = function () {
     if (STB.store.loaded) {
-      STB.cache.write(signedInEmail(), STB.store.parties, STB.store.bills);
+      STB.cache.write(
+        signedInEmail(), STB.store.parties, STB.store.bills, STB.store.invoices
+      );
     }
   };
 
@@ -66,9 +68,13 @@
     if (refreshInFlight) return refreshInFlight;
     refreshInFlight = (async () => {
       try {
-        const { parties, bills } = await STB.db.snapshot();
+        const { parties, bills, invoices } = await STB.db.snapshot();
         STB.store.parties = parties;
         STB.store.bills = bills;
+        // Tolerated missing: a client that loads before the backend is
+        // redeployed gets a snapshot with no invoices, and an empty pool is a
+        // better failure than a TypeError on boot.
+        STB.store.invoices = invoices || [];
         STB.store.loaded = true;
         STB.persistStore();
         STB.renderRoute();
@@ -227,6 +233,7 @@
     if (cached) {
       STB.store.parties = cached.parties;
       STB.store.bills = cached.bills;
+      STB.store.invoices = cached.invoices;
       STB.store.loaded = true;
     }
     renderRoute();

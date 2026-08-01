@@ -20,7 +20,11 @@
    * returns null rather than throwing into boot.
    */
 
-  const KEY = 'stb.snapshot.v1';
+  // v2 adds `invoices`. Bumped rather than left to the Array.isArray check
+  // below to reject v1 blobs by accident: that would work, but it would make
+  // validation double as a migration mechanism, and the next person to relax
+  // the check would silently resurrect stale caches with no invoices in them.
+  const KEY = 'stb.snapshot.v2';
 
   // Same seam auth.js uses, so tests can swap storage between cases.
   function storage() {
@@ -54,22 +58,27 @@
         return null;
       }
       if (!o || typeof o !== 'object' || o.email !== email) return null;
-      if (!Array.isArray(o.parties) || !Array.isArray(o.bills)) {
+      if (!Array.isArray(o.parties) || !Array.isArray(o.bills) ||
+          !Array.isArray(o.invoices)) {
         this.clear();
         return null;
       }
-      return { parties: o.parties, bills: o.bills, at: Number(o.at) || 0 };
+      return {
+        parties: o.parties, bills: o.bills, invoices: o.invoices,
+        at: Number(o.at) || 0
+      };
     },
 
     /** Returns true when the snapshot was stored. Failure is never fatal. */
-    write(email, parties, bills) {
+    write(email, parties, bills, invoices) {
       if (!email) return false;
       try {
         storage().setItem(KEY, JSON.stringify({
           email: email,
           at: Date.now(),
           parties: parties || [],
-          bills: bills || []
+          bills: bills || [],
+          invoices: invoices || []
         }));
         return true;
       } catch (e) {

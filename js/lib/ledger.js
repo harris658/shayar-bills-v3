@@ -39,5 +39,20 @@
     });
   }
 
-  STB.ledger = { totals, outstandingByParty, buildLedger };
+  /**
+   * What has been entered but not yet put on a voucher.
+   *
+   * Kept apart from totals() on purpose: this reads `invoices`, that reads
+   * `bills`, and an invoice leaves this sum at the same moment its voucher
+   * joins that one. Nothing can be counted by both.
+   */
+  function unallocatedInvoiceTotal(invoices) {
+    let total = 0;
+    for (const inv of invoices || []) {
+      if (inv.status === 'unallocated') total += Number(inv.amount);
+    }
+    return total;
+  }
+
+  STB.ledger = { totals, outstandingByParty, buildLedger, unallocatedInvoiceTotal };
 })();

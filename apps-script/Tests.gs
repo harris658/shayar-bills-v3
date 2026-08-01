@@ -15,6 +15,8 @@ function runTests() {
   const stamp = Date.now();
   let p = null;
   const billIds = [];
+  const invoiceIds = [];
+  const parties2 = [];
 
   try {
     // --- columns are located by header text, not by position.
@@ -238,6 +240,149 @@ function runTests() {
     assert_(paid5.status === 'paid',
       'a txn imported unmatched can later be paired to a bill and pay it');
 
+    // ------------------------------------------------------------------
+    // Invoices → debit voucher
+    // ------------------------------------------------------------------
+
+    const invT = table_('invoices');
+    ['id', 'party_id', 'invoice_no', 'amount', 'invoice_date', 'note',
+      'status', 'bill_id', 'created_by', 'created_at'].forEach(function (h) {
+      assert_(invT.index[h] !== undefined, 'invoices column located by header: ' + h);
+    });
+    ['invoice_total', 'adjustment', 'invoice_ids'].forEach(function (h) {
+      assert_(table_('bills').index[h] !== undefined,
+        'bills column located by header: ' + h);
+    });
+
+    const mkInv = function (no, amount, partyId) {
+      const row = createInvoice_({
+        party_id: partyId || p.id, invoice_no: no + '-' + stamp,
+        amount: amount, invoice_date: '2026-03-01', note: 'test inv'
+      }, user);
+      invoiceIds.push(row.id);
+      return row;
+    };
+
+    const i1 = mkInv('INV-A', 10);
+    const i2 = mkInv('INV-B', 20);
+    assert_(i1.status === 'unallocated', 'a new invoice starts unallocated');
+    const i1Read = readAll_('invoices').filter(function (r) { return r.id === i1.id; })[0];
+    assert_(i1Read.invoice_date === '2026-03-01',
+      'invoice_date round-trips as text, got ' + i1Read.invoice_date);
+    assert_(sheet_('invoices')
+      .getRange(findRow_(table_('invoices'), i1.id), table_('invoices').index.invoice_date + 1)
+      .getNumberFormat() === '@',
+      'invoice_date cell is plain text, not a coerced date serial');
+
+    // --- the voucher's total is the server's arithmetic, not the caller's
+    const v1 = createVoucherFromInvoices_(p.id, [i1.id, i2.id], '2026-03-05', user);
+    billIds.push(v1.id);
+    assert_(v1.amount === 30, 'voucher totals its invoices, got ' + v1.amount);
+    assert_(v1.invoice_total === 30, 'invoice_total records what was billed');
+    assert_(v1.adjustment === 0, 'a fresh voucher has no adjustment');
+    assert_(v1.amount_expr === '10+20', 'breakdown is a + chain, got ' + v1.amount_expr);
+    assert_(v1.note.indexOf('INVOICE NO.- ') === 0 &&
+      v1.note.indexOf(i1.invoice_no) >= 0 && v1.note.indexOf(i2.invoice_no) >= 0,
+      'narration carries both invoice numbers, got ' + v1.note);
+    const spent = readAll_('invoices').filter(function (r) {
+      return r.id === i1.id || r.id === i2.id;
+    });
+    assert_(spent.length === 2 && spent[0].status === 'allocated' &&
+      spent[1].status === 'allocated' && spent[0].bill_id === v1.id,
+      'both invoices are marked allocated against the new voucher');
+
+    // --- the same id twice must not be counted twice
+    const i3 = mkInv('INV-C', 7);
+    const v2 = createVoucherFromInvoices_(p.id, [i3.id, i3.id], '2026-03-05', user);
+    billIds.push(v2.id);
+    assert_(v2.amount === 7, 'a duplicated id is deduped, not double-counted, got ' + v2.amount);
+    assert_(v2.amount_expr === '', 'a single invoice stores no breakdown');
+
+    // --- refusals abort the WHOLE call, leaving nothing half-spent
+    const i4 = mkInv('INV-D', 5);
+    threw = false;
+    try {
+      createVoucherFromInvoices_(p.id, [i4.id, i1.id], '2026-03-06', user);
+    } catch (e) { threw = true; errMsg = e.message; }
+    assert_(threw && errMsg.indexOf('already on a voucher') >= 0,
+      'an already-spent invoice is refused, got: ' + errMsg);
+    const i4After = readAll_('invoices').filter(function (r) { return r.id === i4.id; })[0];
+    assert_(i4After.status === 'unallocated',
+      'the OTHER invoice in a refused call is left untouched — no partial spend');
+
+    // --- an invoice cannot be pulled onto another party's voucher
+    const p2 = createParty_('ZZ Test Party B ' + stamp);
+    parties2.push(p2);
+    threw = false;
+    try {
+      createVoucherFromInvoices_(p2.id, [i4.id], '2026-03-06', user);
+    } catch (e) { threw = true; errMsg = e.message; }
+    assert_(threw && errMsg.indexOf('different party') >= 0,
+      'an invoice belonging to another party is refused, got: ' + errMsg);
+
+    threw = false;
+    try { createVoucherFromInvoices_(p.id, ['no-such-id'], '2026-03-06', user); }
+    catch (e) { threw = true; errMsg = e.message; }
+    assert_(threw && errMsg.indexOf('not found') >= 0,
+      'an unknown invoice id is refused, got: ' + errMsg);
+
+    // --- an allocated invoice is frozen
+    threw = false;
+    try { updateInvoice_(i1.id, { amount: 99 }); } catch (e) { threw = true; errMsg = e.message; }
+    assert_(threw && errMsg.indexOf('on a voucher') >= 0,
+      'a spent invoice cannot be edited, got: ' + errMsg);
+    threw = false;
+    try { deleteInvoice_(i1.id); } catch (e) { threw = true; errMsg = e.message; }
+    assert_(threw && errMsg.indexOf('on a voucher') >= 0,
+      'a spent invoice cannot be deleted, got: ' + errMsg);
+    updateInvoice_(i4.id, { amount: 6 });
+    assert_(readAll_('invoices').filter(function (r) { return r.id === i4.id; })[0].amount === 6,
+      'an unallocated invoice can still be corrected');
+
+    // --- the adjustment is derived from invoice_total, and can go either way
+    const adj = adjustVoucherAmount_(v1.id, 29.5);
+    assert_(adj.adjustment === 0.5,
+      'adjustment = invoice_total - amount, got ' + adj.adjustment);
+    const v1Read = readAll_('bills').filter(function (b) { return b.id === v1.id; })[0];
+    assert_(v1Read.amount === 29.5 && v1Read.invoice_total === 30,
+      'the voucher keeps what was billed AND what was paid');
+    assert_(v1Read.amount_expr === '10+20',
+      'adjusting the amount leaves the printed breakdown alone');
+    const adjUp = adjustVoucherAmount_(v1.id, 31);
+    assert_(adjUp.adjustment === -1, 'a charge added on top is a negative adjustment');
+
+    // A fresh PENDING hand-entered bill: the paid check runs first, so reusing
+    // an already-settled one would prove nothing about invoice_total.
+    const plain = createBill_({
+      party_id: p.id, type: 'paid', amount: 42,
+      bill_date: '2026-03-08', note: 'hand entered', amount_expr: ''
+    }, user);
+    billIds.push(plain.id);
+    threw = false;
+    try { adjustVoucherAmount_(plain.id, 5); } catch (e) { threw = true; errMsg = e.message; }
+    assert_(threw && errMsg.indexOf('not an invoice-derived voucher') >= 0,
+      'a hand-entered bill is refused by the voucher adjustment, got: ' + errMsg);
+    // ...and the legacy path still works on it, blank new columns and all.
+    updateBillAmount_(plain.id, 43, '');
+    assert_(readAll_('bills').filter(function (b) { return b.id === plain.id; })[0].amount === 43,
+      'a bill predating the invoice columns still edits normally');
+
+    markPaid_(v2.id, 'UTR-' + stamp + '-F', '2026-03-07');
+    threw = false;
+    try { adjustVoucherAmount_(v2.id, 6); } catch (e) { threw = true; errMsg = e.message; }
+    assert_(threw && errMsg.indexOf('already marked paid') >= 0,
+      'a paid voucher refuses an adjustment, same rule as a bill edit, got: ' + errMsg);
+
+    // --- deleting a voucher hands its invoices back
+    deleteBill_(v1.id);
+    billIds.splice(billIds.indexOf(v1.id), 1);
+    const freed = readAll_('invoices').filter(function (r) {
+      return r.id === i1.id || r.id === i2.id;
+    });
+    assert_(freed[0].status === 'unallocated' && freed[0].bill_id === '' &&
+      freed[1].status === 'unallocated',
+      'deleting a voucher releases every invoice it had spent');
+
     Logger.log('ALL TESTS PASSED');
   } finally {
     // --- cleanup: only what this run created. Bill ids are tracked
@@ -245,6 +390,18 @@ function runTests() {
     // test ref above, so a scratch sheet's other rows are left untouched.
     billIds.forEach(function (id) {
       try { deleteBill_(id); } catch (e) { /* already gone, or never committed — fine */ }
+    });
+    // After the bills, so deleteBill_ has already released whatever it held —
+    // an invoice still marked allocated refuses its own delete.
+    invoiceIds.forEach(function (id) {
+      try {
+        const n = findRow_(table_('invoices'), id);
+        if (n > 0) sheet_('invoices').deleteRow(n);
+      } catch (e) { /* already gone — fine */ }
+    });
+    parties2.forEach(function (party) {
+      const n = findRow_(table_('parties'), party.id);
+      if (n > 0) sheet_('parties').deleteRow(n);
     });
     if (p) {
       const pT = table_('parties');
