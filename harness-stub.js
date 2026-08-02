@@ -124,17 +124,39 @@
     return { ok: true };
   });
 
+  // Mirrors stampAdjustment_ in apps-script/Code.gs: original_amount is written
+  // only once, and reasons accumulate rather than replace.
+  function stampAdjustment(b, prevAmount, reason) {
+    const at = new Date().toISOString();
+    const existingOrig = String(b.original_amount == null ? '' : b.original_amount).trim();
+    b.original_amount = existingOrig === '' ? prevAmount : Number(b.original_amount);
+    b.adjusted_at = at;
+    b.adjusted_by = EMAIL;
+    const t = String(reason == null ? '' : reason).trim();
+    if (t) {
+      const line = at.slice(0, 10) + ': ' + t;
+      b.adjustment_reason = b.adjustment_reason ? b.adjustment_reason + '\n' + line : line;
+    }
+    return b;
+  }
+
   // Mirrors updateBillAmount_ in apps-script/Code.gs, including its refusal on a
   // bill already marked paid — that rejection is a path the UI has to handle.
-  STB.db.updateBillAmount = (id, amount, amountExpr) => respond('updateBillAmount', () => {
+  STB.db.updateBillAmount = (id, amount, amountExpr, reason) => respond('updateBillAmount', () => {
     const amt = Number(amount);
     if (!(amt > 0)) throw new Error('amount must be greater than zero');
     const b = server.bills.find((x) => x.id === id);
     if (!b) throw new Error('bill not found');
     if (b.status === 'paid') throw new Error('bill is already marked paid — delete and re-enter it');
+    const prevAmount = Number(b.amount);
     b.amount = amt;
     b.amount_expr = String(amountExpr || '');
-    return { ok: true, id: id, amount: amt, amount_expr: b.amount_expr };
+    stampAdjustment(b, prevAmount, reason);
+    return {
+      ok: true, id: id, amount: amt, amount_expr: b.amount_expr,
+      original_amount: b.original_amount, adjusted_at: b.adjusted_at,
+      adjusted_by: b.adjusted_by, adjustment_reason: b.adjustment_reason
+    };
   });
 
   STB.db.deleteBill = (id) => respond('deleteBill', () => {
@@ -218,7 +240,7 @@
       return clone(bill);
     });
 
-  STB.db.adjustVoucherAmount = (id, amount) => respond('adjustVoucherAmount', () => {
+  STB.db.adjustVoucherAmount = (id, amount, reason) => respond('adjustVoucherAmount', () => {
     const amt = Number(amount);
     if (!(amt > 0)) throw new Error('amount must be greater than zero');
     const b = server.bills.find((x) => x.id === id);
@@ -227,9 +249,15 @@
     if (b.invoice_total === undefined || String(b.invoice_total).trim() === '') {
       throw new Error('not an invoice-derived voucher — edit its amount instead');
     }
+    const prevAmount = Number(b.amount);
     b.amount = amt;
     b.adjustment = (Math.round(b.invoice_total * 100) - Math.round(amt * 100)) / 100;
-    return { ok: true, id: id, amount: amt, adjustment: b.adjustment };
+    stampAdjustment(b, prevAmount, reason);
+    return {
+      ok: true, id: id, amount: amt, adjustment: b.adjustment,
+      original_amount: b.original_amount, adjusted_at: b.adjusted_at,
+      adjusted_by: b.adjusted_by, adjustment_reason: b.adjustment_reason
+    };
   });
 
   STB.db.signOut = () => STB.auth.signOut();
