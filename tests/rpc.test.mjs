@@ -89,7 +89,7 @@ test('updateBillAmount sends id, amount and expression in one call', async () =>
   const sent = JSON.parse(calls[0].opts.body);
   assert.equal(calls.length, 1);
   assert.equal(sent.action, 'updateBillAmount');
-  assert.deepEqual(sent.args, { id: 'b7', amount: 2050, amount_expr: '1200+850' });
+  assert.deepEqual(sent.args, { id: 'b7', amount: 2050, amount_expr: '1200+850', reason: '' });
 });
 
 test('updateBillAmount sends an empty expression rather than undefined', async () => {
@@ -98,7 +98,7 @@ test('updateBillAmount sends an empty expression rather than undefined', async (
   // undefined would drop the key from the JSON entirely and the server would
   // write "undefined" into amount_expr via String().
   assert.deepEqual(JSON.parse(calls[0].opts.body).args,
-    { id: 'b7', amount: 500, amount_expr: '' });
+    { id: 'b7', amount: 500, amount_expr: '', reason: '' });
 });
 
 test('updateBillAmount surfaces the server refusing a paid bill', async () => {
@@ -213,7 +213,7 @@ test('adjustVoucherAmount sends the paid figure and never the deduction', async 
   const out = await db.adjustVoucherAmount('b9', 29500);
   const sent = JSON.parse(calls[0].opts.body);
   assert.equal(sent.action, 'adjustVoucherAmount');
-  assert.deepEqual(sent.args, { id: 'b9', amount: 29500 });
+  assert.deepEqual(sent.args, { id: 'b9', amount: 29500, reason: '' });
   // adjustment is derived from invoice_total server-side, never sent.
   assert.equal('adjustment' in sent.args, false);
   assert.equal(out.adjustment, 500);
