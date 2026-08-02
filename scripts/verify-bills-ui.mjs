@@ -1,7 +1,8 @@
 /**
  * Drives harness.html to verify the Bills screen: tick-target size, select-all
- * scoped to the filters, and the amount edit (including its rollback and the
- * server's refusal on a paid bill).
+ * scoped to the filters, the amount edit (including its rollback and the
+ * server's refusal on a paid bill), and the adjustment trail — the adjusted
+ * badge, its detail row, and the prior-adjustment warning in the edit modal.
  *
  * Serve the app root first:  python3 -m http.server 8791
  * Then:                      node scripts/verify-bills-ui.mjs
@@ -30,18 +31,25 @@ await page.evaluate(() => document.getElementById('hz').remove());
 
 // A ledger with two parties and a paid row, so the party filter has something
 // to narrow to and the paid-row rules can be checked.
+//
+// created_at is given distinct values (a1 newest .. b2 oldest) rather than a
+// shared default. Both the server sort (Code.gs listBills_) and this harness's
+// mirror of it (snapshot()) break the comparator contract on an exact tie —
+// bill_date AND created_at equal — always answering "a is older", which is
+// impossible for every pair at once and leaves the actual order to sort's
+// internals. Distinct timestamps sidestep that rather than depend on it.
 await page.evaluate(() => {
   const mk = (o) => Object.assign({
     type: 'paid', bill_date: '2026-07-25', note: '', amount_expr: '', status: 'pending',
     payment_ref: '', payment_date: '', created_by: 'x', created_at: '2026-07-25T00:00:00Z'
   }, o);
   window.HZ.server.bills = [
-    mk({ id: 'a1', party_id: 'p-1', amount: 1000, note: 'alpha one' }),
-    mk({ id: 'a2', party_id: 'p-1', amount: 2000, note: 'alpha two', amount_expr: '1200+800' }),
-    mk({ id: 'a3', party_id: 'p-1', amount: 3000, note: 'alpha three' }),
-    mk({ id: 'b1', party_id: 'p-2', amount: 4000, note: 'beta one' }),
+    mk({ id: 'a1', party_id: 'p-1', amount: 1000, note: 'alpha one', created_at: '2026-07-25T00:00:05Z' }),
+    mk({ id: 'a2', party_id: 'p-1', amount: 2000, note: 'alpha two', amount_expr: '1200+800', created_at: '2026-07-25T00:00:04Z' }),
+    mk({ id: 'a3', party_id: 'p-1', amount: 3000, note: 'alpha three', created_at: '2026-07-25T00:00:03Z' }),
+    mk({ id: 'b1', party_id: 'p-2', amount: 4000, note: 'beta one', created_at: '2026-07-25T00:00:02Z' }),
     mk({ id: 'b2', party_id: 'p-2', amount: 5000, note: 'beta two',
-      status: 'paid', payment_ref: 'UTR-OLD', payment_date: '2026-07-26' })
+      status: 'paid', payment_ref: 'UTR-OLD', payment_date: '2026-07-26', created_at: '2026-07-25T00:00:01Z' })
   ];
   return STB.refresh();
 });
@@ -158,21 +166,22 @@ check('a paid row offers no Edit button',
 check('a pending row does offer Edit',
   await page.evaluate(() => !!document.querySelector('tr[data-id="a1"] .edit')));
 
-let dialogSeen = null;
-page.on('dialog', async (d) => { dialogSeen = d.defaultValue; await d.accept(dialogSeen === null ? '' : window.__reply); });
-// Playwright dialogs cannot read page vars; drive prompt() directly instead.
-await page.evaluate(() => { window.__prompts = []; });
-async function editAmount(id, reply) {
-  await page.evaluate((r) => {
-    window.__realPrompt = window.prompt;
-    window.prompt = (msg, def) => { window.__prompts.push({ msg: msg, def: def }); return r; };
-  }, reply);
+// The amount edit now opens a real dialog (see js/lib/adjust-modal.js) rather
+// than a native prompt(). Drive it the same way a person would: click Edit,
+// wait for the backdrop, read/fill the amount field, Save or Cancel.
+async function editAmount(id, reply, reason) {
   await page.click(`tr[data-id="${id}"] .edit`);
+  await page.waitForSelector('.modal-back', { timeout: 3000 });
+  const def = await page.locator('#m-amt').inputValue();
+  if (reply === null) {
+    await page.locator('#m-cancel').click();
+  } else {
+    await page.locator('#m-amt').fill(String(reply));
+    if (reason) await page.locator('#m-reason').fill(reason);
+    await page.locator('#m-save').click();
+  }
   await page.waitForTimeout(150);
-  return page.evaluate(() => {
-    window.prompt = window.__realPrompt;
-    return window.__prompts[window.__prompts.length - 1];
-  });
+  return { def: def };
 }
 
 const seeded = await editAmount('a2', '1500+700');
@@ -250,6 +259,68 @@ const refusal = await page.evaluate(() => ({
 check('a server refusal rolls back and reports the real reason, not "check connection"',
   refusal.amount === 1000 && /already marked paid/.test(refusal.toast),
   JSON.stringify(refusal));
+
+// --- adjustment trail ---------------------------------------------------
+// The refusal check just above deliberately left a1 'paid' on the server
+// (never on the client) to reach the server's own guard. Undo that here: the
+// checks below need a1 editable again, the way a bill that was adjusted but
+// never actually settled would be.
+await page.evaluate(() => {
+  window.HZ.server.bills.find((b) => b.id === 'a1').status = 'pending';
+});
+
+await page.evaluate(() => {
+  const b = window.HZ.server.bills.find((x) => x.id === 'a1');
+  b.amount = 900;
+  b.original_amount = 1000;
+  b.adjusted_at = '2026-08-02T10:00:00.000Z';
+  b.adjusted_by = 'harshit@example.com';
+  b.adjustment_reason = '2026-08-02: short delivery';
+  return STB.refresh();
+});
+await page.waitForTimeout(2500);
+await page.evaluate(() => { location.hash = '#/bills'; });
+await page.waitForTimeout(300);
+
+check('adjusted badge renders on the adjusted bill',
+  await page.locator('tr[data-id="a1"] .badge.adjusted').count() === 1);
+check('unadjusted bills carry no badge',
+  await page.locator('tr[data-id="a3"] .badge.adjusted').count() === 0);
+check('detail row starts hidden',
+  await page.locator('.adj-detail[data-for="a1"]').isHidden());
+
+await page.locator('tr[data-id="a1"] .adj-toggle').click();
+await page.waitForTimeout(150);
+const detail = await page.locator('.adj-detail[data-for="a1"]').innerText();
+check('detail shows original, current and the reason',
+  /1,000/.test(detail) && /900/.test(detail) && /short delivery/.test(detail),
+  detail.replace(/\n/g, ' | '));
+check('detail names who adjusted it', /harshit@example\.com/.test(detail));
+
+// An adjustment must not move a bill. Capture the order before and after.
+const orderAfter = await page.locator('tbody tr[data-id]').evaluateAll(
+  (trs) => trs.map((t) => t.dataset.id));
+check('adjusting a bill does not change list order',
+  JSON.stringify(orderAfter) === JSON.stringify(['a1', 'a2', 'a3', 'b1', 'b2']),
+  orderAfter.join(','));
+
+// the warning appears in the modal for an already-adjusted bill
+await page.locator('tr[data-id="a1"] .edit').click();
+await page.waitForSelector('.modal-back', { timeout: 3000 });
+const warn = await page.locator('.modal-warn').innerText();
+check('modal warns that the bill was already adjusted',
+  /Already adjusted/.test(warn) && /short delivery/.test(warn), warn);
+await page.locator('#m-cancel').click();
+await page.waitForTimeout(150);
+check('cancel closes the modal', await page.locator('.modal-back').count() === 0);
+
+// and does NOT appear for a bill never adjusted
+await page.locator('tr[data-id="a3"] .edit').click();
+await page.waitForSelector('.modal-back', { timeout: 3000 });
+check('no warning on a bill never adjusted',
+  await page.locator('.modal-warn').count() === 0);
+await page.locator('#m-cancel').click();
+await page.waitForTimeout(150);
 
 await page.screenshot({ path: OUT + '/bills-screen.png', fullPage: false });
 
