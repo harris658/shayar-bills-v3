@@ -468,6 +468,41 @@ function runTests() {
       'voucher: adjustment round-trips through the sheet, got: ' + advReread.adjustment);
     assert_(Number(advReread.amount) === 80, 'voucher: amount round-trips as 80');
 
+    // --- adjustment trail guard on an unmigrated sheet ----------------------
+    // setCells_ silently skips a field with no matching header, so a bills
+    // sheet missing the migration would otherwise let an amount edit succeed
+    // while writing nothing to the trail. Header text is cleared and restored
+    // around this block rather than touching a separate sheet, because
+    // table_() locates columns by header text alone — this is the same
+    // "not migrated" state the live sheet would be in pre-migration.
+    const guardT = table_('bills');
+    const trailCols = ['original_amount', 'adjusted_at', 'adjusted_by', 'adjustment_reason'];
+    const trailPositions = trailCols.map(function (c) { return guardT.index[c]; });
+    trailPositions.forEach(function (pos) {
+      assert_(pos !== undefined, 'guard setup: trail column present before clearing');
+    });
+    try {
+      trailPositions.forEach(function (pos) {
+        guardT.sheet.getRange(1, pos + 1).setValue('');
+      });
+      const unmigratedBill = createBill_({
+        party_id: p.id, type: 'paid', amount: 300, bill_date: '2026-08-02',
+        note: 'unmigrated guard', amount_expr: ''
+      }, user);
+      billIds.push(unmigratedBill.id);
+      let guardThrew = false;
+      let guardMsg = '';
+      try { updateBillAmount_(unmigratedBill.id, 250, '', 'test', user); }
+      catch (e) { guardThrew = true; guardMsg = e.message; }
+      assert_(guardThrew, 'updateBillAmount_ refuses an unmigrated bills sheet');
+      assert_(guardMsg.indexOf('migrate-bills-adjustment-schema.sh') >= 0,
+        'the error names the migration script, got: ' + guardMsg);
+    } finally {
+      trailCols.forEach(function (c, i) {
+        guardT.sheet.getRange(1, trailPositions[i] + 1).setValue(c);
+      });
+    }
+
     Logger.log('ALL TESTS PASSED');
   } finally {
     // --- cleanup: only what this run created. Bill ids are tracked

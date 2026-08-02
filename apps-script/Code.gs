@@ -182,6 +182,14 @@ function appendReason_(existing, dateStr, text) {
  * being marked.
  */
 function stampAdjustment_(t, row, prevAmount, reason, user) {
+  // setCells_ silently skips any field whose column header is missing, so a
+  // deploy that lands before the migration adds these four columns would let
+  // the amount edit succeed, the client paint the "adjusted" badge from the
+  // RPC response, and the sheet record nothing — a silent failure dressed up
+  // as a success. Throwing here turns that into a loud, obvious break instead.
+  if (t.index.adjusted_at === undefined) {
+    throw new Error('bills sheet is not migrated — run migrate-bills-adjustment-schema.sh');
+  }
   const iOrig = t.index.original_amount;
   const existingOrig = iOrig === undefined ? '' : String(row[iOrig]).trim();
   const iReason = t.index.adjustment_reason;
