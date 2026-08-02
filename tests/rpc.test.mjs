@@ -101,6 +101,14 @@ test('updateBillAmount sends an empty expression rather than undefined', async (
     { id: 'b7', amount: 500, amount_expr: '', reason: '' });
 });
 
+test('updateBillAmount sends a supplied reason', async () => {
+  reset({ ok: true, data: { ok: true, id: 'b7', amount: 2050 } });
+  await db.updateBillAmount('b7', 2050, '1200+850', 'short delivery');
+  const sent = JSON.parse(calls[0].opts.body);
+  assert.equal(sent.action, 'updateBillAmount');
+  assert.deepEqual(sent.args, { id: 'b7', amount: 2050, amount_expr: '1200+850', reason: 'short delivery' });
+});
+
 test('updateBillAmount surfaces the server refusing a paid bill', async () => {
   reset({ ok: false, error: 'bill is already marked paid — delete and re-enter it' });
   await assert.rejects(() => db.updateBillAmount('b7', 100), /already marked paid/);
@@ -217,6 +225,14 @@ test('adjustVoucherAmount sends the paid figure and never the deduction', async 
   // adjustment is derived from invoice_total server-side, never sent.
   assert.equal('adjustment' in sent.args, false);
   assert.equal(out.adjustment, 500);
+});
+
+test('adjustVoucherAmount sends a supplied reason', async () => {
+  reset({ ok: true, data: { ok: true, amount: 29500, adjustment: 500 } });
+  await db.adjustVoucherAmount('b9', 29500, 'bank deduction');
+  const sent = JSON.parse(calls[0].opts.body);
+  assert.equal(sent.action, 'adjustVoucherAmount');
+  assert.deepEqual(sent.args, { id: 'b9', amount: 29500, reason: 'bank deduction' });
 });
 
 test("the server's refusal to edit a spent invoice surfaces as a throw", async () => {
