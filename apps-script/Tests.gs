@@ -383,6 +383,126 @@ function runTests() {
       freed[1].status === 'unallocated',
       'deleting a voucher releases every invoice it had spent');
 
+    // --- adjustment trail ---------------------------------------------------
+    const adjBill = createBill_({
+      party_id: p.id, type: 'paid', amount: 1000, bill_date: '2026-08-02',
+      note: 'adjust me', amount_expr: ''
+    }, user);
+    billIds.push(adjBill.id);
+
+    const a1 = updateBillAmount_(adjBill.id, 900, '1000-100', 'short delivery', user);
+    assert_(Number(a1.original_amount) === 1000,
+      'first adjustment records original_amount 1000, got: ' + a1.original_amount);
+    assert_(String(a1.adjusted_by) === user.email, 'adjusted_by is the signed-in user');
+    assert_(String(a1.adjusted_at).length > 0, 'adjusted_at is stamped');
+    assert_(a1.adjustment_reason.indexOf('short delivery') >= 0,
+      'first reason recorded, got: ' + a1.adjustment_reason);
+
+    const a2 = updateBillAmount_(adjBill.id, 850, '1000-100-50', 'damages', user);
+    assert_(Number(a2.original_amount) === 1000,
+      'second adjustment leaves original_amount at 1000, got: ' + a2.original_amount);
+    assert_(a2.adjustment_reason.split('\n').length === 2,
+      'reasons append rather than replace, got: ' + a2.adjustment_reason);
+    assert_(a2.adjustment_reason.indexOf('short delivery') >= 0 &&
+      a2.adjustment_reason.indexOf('damages') >= 0, 'both reasons survive');
+
+    const a3 = updateBillAmount_(adjBill.id, 800, '1000-100-50-50', '', user);
+    assert_(a3.adjustment_reason.split('\n').length === 2,
+      'a blank reason adds no line, got: ' + a3.adjustment_reason);
+    assert_(String(a3.adjusted_at).length > 0,
+      'a blank reason still stamps adjusted_at');
+
+    const reread = readAll_('bills').filter(function (b) { return b.id === adjBill.id; })[0];
+    assert_(Number(reread.original_amount) === 1000,
+      'original_amount round-trips through the sheet');
+    assert_(Number(reread.amount) === 800, 'amount round-trips as 800');
+
+    // a paid bill is still refused, and refusing must not stamp anything
+    const paidBill = createBill_({
+      party_id: p.id, type: 'paid', amount: 500, bill_date: '2026-08-02',
+      note: 'already paid', status: 'paid'
+    }, user);
+    billIds.push(paidBill.id);
+    let adjThrew = false;
+    try { updateBillAmount_(paidBill.id, 400, '', 'nope', user); }
+    catch (e) { adjThrew = true; }
+    assert_(adjThrew, 'a paid bill still refuses an amount edit');
+    const paidReread = readAll_('bills').filter(function (b) {
+      return b.id === paidBill.id;
+    })[0];
+    assert_(String(paidReread.adjusted_at || '') === '',
+      'a refused edit leaves adjusted_at empty');
+
+    // --- adjustment trail on a voucher (adjustVoucherAmount_ path) ----------
+    const advI1 = mkInv('INV-ADV-A', 40);
+    const advI2 = mkInv('INV-ADV-B', 60);
+    const advVoucher = createVoucherFromInvoices_(p.id, [advI1.id, advI2.id], '2026-08-02', user);
+    billIds.push(advVoucher.id);
+    assert_(advVoucher.invoice_total === 100,
+      'adjustment-trail voucher totals its invoices, got ' + advVoucher.invoice_total);
+
+    const va1 = adjustVoucherAmount_(advVoucher.id, 90, 'short delivery', user);
+    assert_(Number(va1.original_amount) === 100,
+      'voucher: first adjustment records original_amount as pre-edit amount, got: ' + va1.original_amount);
+    assert_(String(va1.adjusted_by) === user.email, 'voucher: adjusted_by is the signed-in user');
+    assert_(String(va1.adjusted_at).length > 0, 'voucher: adjusted_at is stamped');
+    assert_(va1.adjustment_reason.indexOf('short delivery') >= 0,
+      'voucher: first reason recorded, got: ' + va1.adjustment_reason);
+    assert_(va1.adjustment === 10,
+      'voucher: adjustment = invoice_total - amount, got ' + va1.adjustment);
+
+    const va2 = adjustVoucherAmount_(advVoucher.id, 80, 'bank charges', user);
+    assert_(Number(va2.original_amount) === 100,
+      'voucher: second adjustment leaves original_amount at 100, got: ' + va2.original_amount);
+    assert_(va2.adjustment_reason.split('\n').length === 2,
+      'voucher: reasons append rather than replace, got: ' + va2.adjustment_reason);
+    assert_(va2.adjustment_reason.indexOf('short delivery') >= 0 &&
+      va2.adjustment_reason.indexOf('bank charges') >= 0, 'voucher: both reasons survive');
+    assert_(va2.adjustment === 20,
+      'voucher: adjustment derivation still works alongside the stamping, got: ' + va2.adjustment);
+
+    const advReread = readAll_('bills').filter(function (b) { return b.id === advVoucher.id; })[0];
+    assert_(Number(advReread.original_amount) === 100,
+      'voucher: original_amount round-trips through the sheet');
+    assert_(Number(advReread.adjustment) === 20,
+      'voucher: adjustment round-trips through the sheet, got: ' + advReread.adjustment);
+    assert_(Number(advReread.amount) === 80, 'voucher: amount round-trips as 80');
+
+    // --- adjustment trail guard on an unmigrated sheet ----------------------
+    // setCells_ silently skips a field with no matching header, so a bills
+    // sheet missing the migration would otherwise let an amount edit succeed
+    // while writing nothing to the trail. Header text is cleared and restored
+    // around this block rather than touching a separate sheet, because
+    // table_() locates columns by header text alone — this is the same
+    // "not migrated" state the live sheet would be in pre-migration.
+    const guardT = table_('bills');
+    const trailCols = ['original_amount', 'adjusted_at', 'adjusted_by', 'adjustment_reason'];
+    const trailPositions = trailCols.map(function (c) { return guardT.index[c]; });
+    trailPositions.forEach(function (pos) {
+      assert_(pos !== undefined, 'guard setup: trail column present before clearing');
+    });
+    try {
+      trailPositions.forEach(function (pos) {
+        guardT.sheet.getRange(1, pos + 1).setValue('');
+      });
+      const unmigratedBill = createBill_({
+        party_id: p.id, type: 'paid', amount: 300, bill_date: '2026-08-02',
+        note: 'unmigrated guard', amount_expr: ''
+      }, user);
+      billIds.push(unmigratedBill.id);
+      let guardThrew = false;
+      let guardMsg = '';
+      try { updateBillAmount_(unmigratedBill.id, 250, '', 'test', user); }
+      catch (e) { guardThrew = true; guardMsg = e.message; }
+      assert_(guardThrew, 'updateBillAmount_ refuses an unmigrated bills sheet');
+      assert_(guardMsg.indexOf('migrate-bills-adjustment-schema.sh') >= 0,
+        'the error names the migration script, got: ' + guardMsg);
+    } finally {
+      trailCols.forEach(function (c, i) {
+        guardT.sheet.getRange(1, trailPositions[i] + 1).setValue(c);
+      });
+    }
+
     Logger.log('ALL TESTS PASSED');
   } finally {
     // --- cleanup: only what this run created. Bill ids are tracked

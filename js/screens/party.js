@@ -60,11 +60,13 @@
           <td>${U.fmtDate(b.bill_date)}</td>
           <td>${U.escapeHTML(b.note || '')}</td>
           <td><span class="badge ${b.status}">${b.status}</span>
+              ${STB.adjust.badgeHTML(b)}
               <span class="hint">${U.escapeHTML(b.payment_ref || '')}</span></td>
           <td class="num ${delta > 0 ? 'text-pos' : 'text-neg'}">
             ${delta > 0 ? '+' : '−'}${U.money(Math.abs(delta))}</td>
           <td class="num">${running < 0 ? '−' : ''}${U.money(Math.abs(running))}</td>
-        </tr>`).join('');
+        </tr>${STB.adjust.detailRowHTML(b, 5,
+          STB.store.invoices.filter((i) => i.bill_id === b.id))}`).join('');
 
       root.innerHTML = `
         <div class="card">
@@ -89,6 +91,8 @@
         STB.printParty = partyId;
         STB.nav('#/print/statement');
       });
+
+      STB.adjust.wireToggles(root);
     }
   };
 })();

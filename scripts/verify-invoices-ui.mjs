@@ -196,18 +196,22 @@ check('the printed narration carries both invoice numbers',
     .includes('JFPS26-27-000168, JFPS26-27-000154'));
 
 // -------------------------------------------------------------- adjustment ---
+// The voucher amount edit is a real dialog now (js/lib/adjust-modal.js), not a
+// prompt() — drive it the same way a person would: click Edit, wait for the
+// backdrop, read the hint and the seeded amount, fill, Save.
 await go('#/bills');
-const adjust = await page.evaluate(async (id) => {
-  window.__realPrompt = window.prompt;
-  let seen = null;
-  window.prompt = (msg, def) => { seen = { msg, def }; return '19500'; };
-  document.querySelector(`.edit[data-id="${id}"]`).click();
-  window.prompt = window.__realPrompt;
-  return seen;
-}, voucher.id);
-check('the adjustment prompt shows what the invoices came to',
-  adjust && /Invoices total/.test(adjust.msg) && /₹20,000/.test(adjust.msg) &&
+await page.locator(`.edit[data-id="${voucher.id}"]`).click();
+await page.waitForSelector('.modal-back', { timeout: 3000 });
+const adjust = await page.evaluate(() => ({
+  hint: (document.querySelector('.modal-back p.hint:not(.modal-party)') || {}).textContent || '',
+  def: document.querySelector('#m-amt').value
+}));
+check('the adjustment modal shows what the invoices came to',
+  /Invoices total/.test(adjust.hint) && /₹20,000/.test(adjust.hint) &&
   adjust.def === '20000', JSON.stringify(adjust));
+await page.locator('#m-amt').fill('19500');
+await page.locator('#m-save').click();
+await page.waitForTimeout(150);
 
 const afterAdjust = await page.evaluate((id) => {
   const b = STB.store.bills.find((x) => x.id === id);

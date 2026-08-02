@@ -63,9 +63,11 @@
         return `<tr>
           <td>${U.fmtDate(b.bill_date)}</td>
           <td><a href="#/party/${b.party_id}">${U.escapeHTML(p ? p.name : '?')}</a></td>
-          <td><span class="badge ${b.status}">${b.status}</span></td>
+          <td><span class="badge ${b.status}">${b.status}</span>
+              ${STB.adjust.badgeHTML(b)}</td>
           <td class="num ${cls}">${sign}${U.money(b.amount)}</td>
-        </tr>`;
+        </tr>${STB.adjust.detailRowHTML(b, 4,
+          STB.store.invoices.filter((i) => i.bill_id === b.id))}`;
       }).join('');
 
       root.innerHTML = `
@@ -102,6 +104,8 @@
             </div>
           </div>
         </div>`;
+
+      STB.adjust.wireToggles(root);
     }
   };
 })();

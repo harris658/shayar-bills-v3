@@ -86,9 +86,10 @@
       });
     },
     // Amount only, and the server refuses it on a bill already marked paid.
-    updateBillAmount(id, amount, amountExpr) {
+    // `reason` is optional and appends to the bill's adjustment log.
+    updateBillAmount(id, amount, amountExpr, reason) {
       return rpc('updateBillAmount', {
-        id: id, amount: amount, amount_expr: amountExpr || ''
+        id: id, amount: amount, amount_expr: amountExpr || '', reason: reason || ''
       });
     },
     deleteBill(id) { return rpc('deleteBill', { id: id }); },
@@ -111,8 +112,8 @@
       });
     },
     // Records what the bank actually debited; the deduction is derived server-side.
-    adjustVoucherAmount(id, amount) {
-      return rpc('adjustVoucherAmount', { id: id, amount: amount });
+    adjustVoucherAmount(id, amount, reason) {
+      return rpc('adjustVoucherAmount', { id: id, amount: amount, reason: reason || '' });
     },
 
     // Wipes bills AND imported bank txns. The txns reference bills and, kept

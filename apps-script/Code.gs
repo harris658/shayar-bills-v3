@@ -38,7 +38,7 @@ function dispatch_(action, args, user) {
       });
     case 'updateBillAmount':
       return withLock_(function () {
-        return updateBillAmount_(args.id, args.amount, args.amount_expr);
+        return updateBillAmount_(args.id, args.amount, args.amount_expr, args.reason, user);
       });
     case 'deleteBill':
       return withLock_(function () { return deleteBill_(args.id); });
@@ -53,7 +53,9 @@ function dispatch_(action, args, user) {
         return createVoucherFromInvoices_(args.party_id, args.invoice_ids, args.bill_date, user);
       });
     case 'adjustVoucherAmount':
-      return withLock_(function () { return adjustVoucherAmount_(args.id, args.amount); });
+      return withLock_(function () {
+        return adjustVoucherAmount_(args.id, args.amount, args.reason, user);
+      });
     case 'deleteAllBills':
       return withLock_(function () { return deleteAllBills_(); });
     case 'applyImport':
@@ -157,6 +159,51 @@ function markPaid_(id, paymentRef, paymentDate) {
 }
 
 /**
+ * Appends one dated line to a reason log, oldest first.
+ *
+ * Appending rather than replacing is what makes a third adjustment legible
+ * after the first two have been forgotten — the whole point of the trail. A
+ * blank reason adds no line, so the field never blocks a quick edit.
+ */
+function appendReason_(existing, dateStr, text) {
+  const t = String(text == null ? '' : text).trim();
+  const prev = String(existing == null ? '' : existing);
+  if (!t) return prev;
+  const line = dateStr + ': ' + t;
+  return prev ? prev + '\n' + line : line;
+}
+
+/**
+ * The four adjustment-trail fields for one edit.
+ *
+ * original_amount is written only when the cell is empty, so it keeps the true
+ * starting figure through any number of later edits. The caller folds this into
+ * the SAME setCells_ call as the amount, so an amount can never change without
+ * being marked.
+ */
+function stampAdjustment_(t, row, prevAmount, reason, user) {
+  // setCells_ silently skips any field whose column header is missing, so a
+  // deploy that lands before the migration adds these four columns would let
+  // the amount edit succeed, the client paint the "adjusted" badge from the
+  // RPC response, and the sheet record nothing — a silent failure dressed up
+  // as a success. Throwing here turns that into a loud, obvious break instead.
+  if (t.index.adjusted_at === undefined) {
+    throw new Error('bills sheet is not migrated — run migrate-bills-adjustment-schema.sh');
+  }
+  const iOrig = t.index.original_amount;
+  const existingOrig = iOrig === undefined ? '' : String(row[iOrig]).trim();
+  const iReason = t.index.adjustment_reason;
+  const existingReason = iReason === undefined ? '' : String(row[iReason] || '');
+  const at = nowIso_();
+  return {
+    original_amount: existingOrig === '' ? prevAmount : Number(row[iOrig]),
+    adjusted_at: at,
+    adjusted_by: user && user.email ? user.email : '',
+    adjustment_reason: appendReason_(existingReason, at.slice(0, 10), reason)
+  };
+}
+
+/**
  * Corrects a mistyped amount. Amount only — party, date, note and direction are
  * not editable, because a bill with a different party or direction is a
  * different bill and should be deleted and re-entered.
@@ -171,7 +218,7 @@ function markPaid_(id, paymentRef, paymentDate) {
  * amount..amount_expr, sweeping bill_date and note through a getValues/setValues
  * round trip they have no reason to make.
  */
-function updateBillAmount_(id, amount, amountExpr) {
+function updateBillAmount_(id, amount, amountExpr, reason, user) {
   const amt = Number(amount);
   if (!(amt > 0)) throw new Error('amount must be greater than zero');
   const t = table_('bills');
@@ -181,8 +228,23 @@ function updateBillAmount_(id, amount, amountExpr) {
   if (String(row[t.index.status]).trim().toLowerCase() === 'paid') {
     throw new Error('bill is already marked paid — delete and re-enter it');
   }
-  setCells_(t, rowNum, { amount: amt, amount_expr: String(amountExpr || '') });
-  return { ok: true, id: String(id), amount: amt, amount_expr: String(amountExpr || '') };
+  const prevAmount = Number(row[t.index.amount]);
+  const stamp = stampAdjustment_(t, row, prevAmount, reason, user);
+  // One setCells_ call: the amount and the mark that records it cannot land
+  // apart, so there is no state where a bill changed but reads as untouched.
+  setCells_(t, rowNum, {
+    amount: amt,
+    amount_expr: String(amountExpr || ''),
+    original_amount: stamp.original_amount,
+    adjusted_at: stamp.adjusted_at,
+    adjusted_by: stamp.adjusted_by,
+    adjustment_reason: stamp.adjustment_reason
+  });
+  return {
+    ok: true, id: String(id), amount: amt, amount_expr: String(amountExpr || ''),
+    original_amount: stamp.original_amount, adjusted_at: stamp.adjusted_at,
+    adjusted_by: stamp.adjusted_by, adjustment_reason: stamp.adjustment_reason
+  };
 }
 
 /**
@@ -447,7 +509,7 @@ function createVoucherFromInvoices_(partyId, invoiceIds, billDate, user) {
  * debited, and what was deducted falls out of invoice_total − amount. Negative
  * is legal — charges added on top are an adjustment too.
  */
-function adjustVoucherAmount_(id, amount) {
+function adjustVoucherAmount_(id, amount, reason, user) {
   const amt = Number(amount);
   if (!(amt > 0)) throw new Error('amount must be greater than zero');
   const t = table_('bills');
@@ -462,8 +524,21 @@ function adjustVoucherAmount_(id, amount) {
     throw new Error('not an invoice-derived voucher — edit its amount instead');
   }
   const adjustment = (toPaise_(rawTotal) - toPaise_(amt)) / 100;
-  setCells_(t, rowNum, { amount: amt, adjustment: adjustment });
-  return { ok: true, id: String(id), amount: amt, adjustment: adjustment };
+  const prevAmount = Number(row[t.index.amount]);
+  const stamp = stampAdjustment_(t, row, prevAmount, reason, user);
+  setCells_(t, rowNum, {
+    amount: amt,
+    adjustment: adjustment,
+    original_amount: stamp.original_amount,
+    adjusted_at: stamp.adjusted_at,
+    adjusted_by: stamp.adjusted_by,
+    adjustment_reason: stamp.adjustment_reason
+  });
+  return {
+    ok: true, id: String(id), amount: amt, adjustment: adjustment,
+    original_amount: stamp.original_amount, adjusted_at: stamp.adjusted_at,
+    adjusted_by: stamp.adjusted_by, adjustment_reason: stamp.adjustment_reason
+  };
 }
 
 /**
