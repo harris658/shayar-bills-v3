@@ -383,6 +383,56 @@ function runTests() {
       freed[1].status === 'unallocated',
       'deleting a voucher releases every invoice it had spent');
 
+    // --- adjustment trail ---------------------------------------------------
+    const adjBill = createBill_({
+      party_id: p.id, type: 'paid', amount: 1000, bill_date: '2026-08-02',
+      note: 'adjust me', amount_expr: ''
+    }, user);
+    billIds.push(adjBill.id);
+
+    const a1 = updateBillAmount_(adjBill.id, 900, '1000-100', 'short delivery', user);
+    assert_(Number(a1.original_amount) === 1000,
+      'first adjustment records original_amount 1000, got: ' + a1.original_amount);
+    assert_(String(a1.adjusted_by) === user.email, 'adjusted_by is the signed-in user');
+    assert_(String(a1.adjusted_at).length > 0, 'adjusted_at is stamped');
+    assert_(a1.adjustment_reason.indexOf('short delivery') >= 0,
+      'first reason recorded, got: ' + a1.adjustment_reason);
+
+    const a2 = updateBillAmount_(adjBill.id, 850, '1000-100-50', 'damages', user);
+    assert_(Number(a2.original_amount) === 1000,
+      'second adjustment leaves original_amount at 1000, got: ' + a2.original_amount);
+    assert_(a2.adjustment_reason.split('\n').length === 2,
+      'reasons append rather than replace, got: ' + a2.adjustment_reason);
+    assert_(a2.adjustment_reason.indexOf('short delivery') >= 0 &&
+      a2.adjustment_reason.indexOf('damages') >= 0, 'both reasons survive');
+
+    const a3 = updateBillAmount_(adjBill.id, 800, '1000-100-50-50', '', user);
+    assert_(a3.adjustment_reason.split('\n').length === 2,
+      'a blank reason adds no line, got: ' + a3.adjustment_reason);
+    assert_(String(a3.adjusted_at).length > 0,
+      'a blank reason still stamps adjusted_at');
+
+    const reread = readAll_('bills').filter(function (b) { return b.id === adjBill.id; })[0];
+    assert_(Number(reread.original_amount) === 1000,
+      'original_amount round-trips through the sheet');
+    assert_(Number(reread.amount) === 800, 'amount round-trips as 800');
+
+    // a paid bill is still refused, and refusing must not stamp anything
+    const paidBill = createBill_({
+      party_id: p.id, type: 'paid', amount: 500, bill_date: '2026-08-02',
+      note: 'already paid', status: 'paid'
+    }, user);
+    billIds.push(paidBill.id);
+    let adjThrew = false;
+    try { updateBillAmount_(paidBill.id, 400, '', 'nope', user); }
+    catch (e) { adjThrew = true; }
+    assert_(adjThrew, 'a paid bill still refuses an amount edit');
+    const paidReread = readAll_('bills').filter(function (b) {
+      return b.id === paidBill.id;
+    })[0];
+    assert_(String(paidReread.adjusted_at || '') === '',
+      'a refused edit leaves adjusted_at empty');
+
     Logger.log('ALL TESTS PASSED');
   } finally {
     // --- cleanup: only what this run created. Bill ids are tracked
