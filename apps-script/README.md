@@ -118,6 +118,46 @@ post-push step. Update that literal directly if the client ID ever changes.
 
 ## Deploying
 
+### The two IDs
+
+`scripts/deploy-backend.sh` takes both, and neither is discoverable from any
+API — the Apps Script API has no endpoint that lists projects, and a
+container-bound script does not appear in a Drive file listing. Recorded here
+because the alternative is fishing the scriptId out of the editor URL every
+time.
+
+| | |
+| --- | --- |
+| `scriptId` | `1KApp9mI7Z7XpyMhzJa-2sDDyD_43wvR3P3d3ULeXeBJKbIlR95jVnYBk` |
+| `deploymentId` | `AKfycbxti1NBzV5kAf0VU4gP0LWJZWSj0K28kxLemw0uAxT60_Gc-wHleqlUXF9fk5Z6rlOJ` |
+
+The project is `Shayar Bills Backend`, bound to the `Shayar Tex — Bills`
+spreadsheet (`1WDW0V_CVW5CZeUMpVy6ZHQiXFioSdLjbjGA0J0Fsugg`).
+
+The `deploymentId` is also the segment after `/macros/s/` in the `/exec` URL in
+`js/config.js` — if the two ever disagree, `js/config.js` is the authority on
+which deployment the app actually talks to, and the mismatch means a past
+deploy minted a new URL instead of updating this one.
+
+Two other deployments exist and are **not** the live one: an `@HEAD` deployment
+the editor always keeps, and `AKfycbz3UG…` (version 1, "v1 web app"). Updating
+either of those ships nothing to users.
+
+So the full command is:
+
+```bash
+bash scripts/deploy-backend.sh \
+  1KApp9mI7Z7XpyMhzJa-2sDDyD_43wvR3P3d3ULeXeBJKbIlR95jVnYBk \
+  AKfycbxti1NBzV5kAf0VU4gP0LWJZWSj0K28kxLemw0uAxT60_Gc-wHleqlUXF9fk5Z6rlOJ
+```
+
+**Passing the scriptId alone is not a partial success.** With no
+`deploymentId` the script pushes the source and cuts a version but updates no
+deployment — the `/exec` URL keeps serving the old code, and every visible
+signal says the deploy worked.
+
+### Editor equivalent
+
 Deploy → New deployment → Web app:
 
 - Execute as: **Me** (`executeAs: USER_DEPLOYING`)
