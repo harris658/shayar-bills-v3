@@ -62,35 +62,41 @@
       if (Number.isNaN(v)) { STB.toast('Could not read that amount'); return; }
       const amt = Math.round(v * 100) / 100;
       if (!(amt > 0)) { STB.toast('Amount must be more than 0'); return; }
-      if (amt === Number(b.amount) && !res.reason) return;
+
+      // Re-find rather than reusing `b`: the modal can sit open indefinitely
+      // while typing, and a background refresh may have replaced the array in
+      // that window, leaving `b` an orphan whose mutation nothing would render.
+      const cur = STB.store.bills.find((x) => x.id === b.id);
+      if (!cur) { STB.toast('Bill no longer exists'); return; }
+      if (amt === Number(cur.amount) && !res.reason) return;
 
       const before = {
-        amount: b.amount, adjustment: b.adjustment,
-        original_amount: b.original_amount, adjusted_at: b.adjusted_at,
-        adjusted_by: b.adjusted_by, adjustment_reason: b.adjustment_reason
+        amount: cur.amount, adjustment: cur.adjustment,
+        original_amount: cur.original_amount, adjusted_at: cur.adjusted_at,
+        adjusted_by: cur.adjusted_by, adjustment_reason: cur.adjustment_reason
       };
-      b.amount = amt;
-      b.adjustment = Math.round((billed - amt) * 100) / 100;
-      STB.toast(b.adjustment > 0
-        ? 'Paid ' + U.money(amt) + ' — ' + U.money(b.adjustment) + ' deducted ✓'
+      cur.amount = amt;
+      cur.adjustment = Math.round((billed - amt) * 100) / 100;
+      STB.toast(cur.adjustment > 0
+        ? 'Paid ' + U.money(amt) + ' — ' + U.money(cur.adjustment) + ' deducted ✓'
         : 'Amount updated ✓');
       STB.commitStore();
 
-      STB.db.adjustVoucherAmount(b.id, amt, res.reason).then((r) => {
+      STB.db.adjustVoucherAmount(cur.id, amt, res.reason).then((r) => {
         // The server owns the stamp — copy back what it wrote so the badge and
         // the next warning show the real timestamp, not an optimistic guess.
-        const cur = STB.store.bills.find((x) => x.id === b.id);
-        if (cur && r) {
-          cur.original_amount = r.original_amount;
-          cur.adjusted_at = r.adjusted_at;
-          cur.adjusted_by = r.adjusted_by;
-          cur.adjustment_reason = r.adjustment_reason;
+        const c2 = STB.store.bills.find((x) => x.id === cur.id);
+        if (c2 && r) {
+          c2.original_amount = r.original_amount;
+          c2.adjusted_at = r.adjusted_at;
+          c2.adjusted_by = r.adjusted_by;
+          c2.adjustment_reason = r.adjustment_reason;
           STB.commitStore();
         }
       }).catch((e) => {
         console.error('adjustVoucherAmount failed', e);
-        const cur = STB.store.bills.find((x) => x.id === b.id);
-        if (cur) Object.assign(cur, before);
+        const c2 = STB.store.bills.find((x) => x.id === cur.id);
+        if (c2) Object.assign(c2, before);
         STB.toast('Could not update — ' + (e.message || 'reverted'));
         STB.commitStore();
       });
@@ -318,31 +324,37 @@
           // Same rule as the entry form: keep the breakdown only when one was
           // actually typed. Operator anywhere, or a minus past the first char.
           const expr = /[+*/]|(?!^)-/.test(typed) ? typed : '';
-          if (amt === Number(b.amount) && expr === (b.amount_expr || '') && !res.reason) return;
+
+          // Re-find rather than reusing `b`: the modal can sit open indefinitely
+          // while typing, and a background refresh may have replaced the array in
+          // that window, leaving `b` an orphan whose mutation nothing would render.
+          const cur = STB.store.bills.find((x) => x.id === id);
+          if (!cur) { STB.toast('Bill no longer exists'); return; }
+          if (amt === Number(cur.amount) && expr === (cur.amount_expr || '') && !res.reason) return;
 
           const before = {
-            amount: b.amount, amount_expr: b.amount_expr,
-            original_amount: b.original_amount, adjusted_at: b.adjusted_at,
-            adjusted_by: b.adjusted_by, adjustment_reason: b.adjustment_reason
+            amount: cur.amount, amount_expr: cur.amount_expr,
+            original_amount: cur.original_amount, adjusted_at: cur.adjusted_at,
+            adjusted_by: cur.adjusted_by, adjustment_reason: cur.adjustment_reason
           };
-          b.amount = amt;
-          b.amount_expr = expr;
+          cur.amount = amt;
+          cur.amount_expr = expr;
           STB.toast('Amount updated ✓');
           STB.commitStore();
 
           STB.db.updateBillAmount(id, amt, expr, res.reason).then((r) => {
-            const cur = STB.store.bills.find((x) => x.id === id);
-            if (cur && r) {
-              cur.original_amount = r.original_amount;
-              cur.adjusted_at = r.adjusted_at;
-              cur.adjusted_by = r.adjusted_by;
-              cur.adjustment_reason = r.adjustment_reason;
+            const c2 = STB.store.bills.find((x) => x.id === id);
+            if (c2 && r) {
+              c2.original_amount = r.original_amount;
+              c2.adjusted_at = r.adjusted_at;
+              c2.adjusted_by = r.adjusted_by;
+              c2.adjustment_reason = r.adjustment_reason;
               STB.commitStore();
             }
           }).catch((e) => {
             console.error('updateBillAmount failed', e);
-            const cur = STB.store.bills.find((x) => x.id === id);
-            if (cur) Object.assign(cur, before);
+            const c2 = STB.store.bills.find((x) => x.id === id);
+            if (c2) Object.assign(c2, before);
             // Surface the server's reason — "already marked paid" is a real
             // outcome here (someone else settled it from another device), not a
             // connection problem, and "check connection" would send Harshit
