@@ -433,6 +433,41 @@ function runTests() {
     assert_(String(paidReread.adjusted_at || '') === '',
       'a refused edit leaves adjusted_at empty');
 
+    // --- adjustment trail on a voucher (adjustVoucherAmount_ path) ----------
+    const advI1 = mkInv('INV-ADV-A', 40);
+    const advI2 = mkInv('INV-ADV-B', 60);
+    const advVoucher = createVoucherFromInvoices_(p.id, [advI1.id, advI2.id], '2026-08-02', user);
+    billIds.push(advVoucher.id);
+    assert_(advVoucher.invoice_total === 100,
+      'adjustment-trail voucher totals its invoices, got ' + advVoucher.invoice_total);
+
+    const va1 = adjustVoucherAmount_(advVoucher.id, 90, 'short delivery', user);
+    assert_(Number(va1.original_amount) === 100,
+      'voucher: first adjustment records original_amount as pre-edit amount, got: ' + va1.original_amount);
+    assert_(String(va1.adjusted_by) === user.email, 'voucher: adjusted_by is the signed-in user');
+    assert_(String(va1.adjusted_at).length > 0, 'voucher: adjusted_at is stamped');
+    assert_(va1.adjustment_reason.indexOf('short delivery') >= 0,
+      'voucher: first reason recorded, got: ' + va1.adjustment_reason);
+    assert_(va1.adjustment === 10,
+      'voucher: adjustment = invoice_total - amount, got ' + va1.adjustment);
+
+    const va2 = adjustVoucherAmount_(advVoucher.id, 80, 'bank charges', user);
+    assert_(Number(va2.original_amount) === 100,
+      'voucher: second adjustment leaves original_amount at 100, got: ' + va2.original_amount);
+    assert_(va2.adjustment_reason.split('\n').length === 2,
+      'voucher: reasons append rather than replace, got: ' + va2.adjustment_reason);
+    assert_(va2.adjustment_reason.indexOf('short delivery') >= 0 &&
+      va2.adjustment_reason.indexOf('bank charges') >= 0, 'voucher: both reasons survive');
+    assert_(va2.adjustment === 20,
+      'voucher: adjustment derivation still works alongside the stamping, got: ' + va2.adjustment);
+
+    const advReread = readAll_('bills').filter(function (b) { return b.id === advVoucher.id; })[0];
+    assert_(Number(advReread.original_amount) === 100,
+      'voucher: original_amount round-trips through the sheet');
+    assert_(Number(advReread.adjustment) === 20,
+      'voucher: adjustment round-trips through the sheet, got: ' + advReread.adjustment);
+    assert_(Number(advReread.amount) === 80, 'voucher: amount round-trips as 80');
+
     Logger.log('ALL TESTS PASSED');
   } finally {
     // --- cleanup: only what this run created. Bill ids are tracked
