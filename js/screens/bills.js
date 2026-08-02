@@ -111,11 +111,13 @@
           <td>${b.status === 'paid'
             ? `<span class="badge paid">Paid</span> <span class="hint">${U.escapeHTML(b.payment_ref || '')}</span>`
             : `<span class="badge pending">Pending</span>
-               <button class="btn ghost mark-paid" data-id="${b.id}">Mark paid</button>`}</td>
+               <button class="btn ghost mark-paid" data-id="${b.id}">Mark paid</button>`}
+            ${STB.adjust.badgeHTML(b)}</td>
           <td class="row-actions">${b.status === 'paid' ? '' :
             `<button class="btn ghost edit" data-id="${b.id}" title="Edit amount">Edit</button> `
             }<button class="btn ghost del" data-id="${b.id}" title="Delete">✕</button></td>
-        </tr>`;
+        </tr>${STB.adjust.detailRowHTML(b, 7,
+          STB.store.invoices.filter((i) => i.bill_id === b.id))}`;
       }).join('');
 
       root.innerHTML = `
@@ -324,6 +326,8 @@
           STB.commitStore();
         });
       }));
+
+      STB.adjust.wireToggles(root);
 
       root.querySelector('#print-sel').addEventListener('click', () => {
         // Iterate STB.store.bills (not the Set) so the resulting array keeps
