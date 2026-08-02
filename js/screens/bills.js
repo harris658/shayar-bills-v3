@@ -10,6 +10,24 @@
   const selected = new Set();
 
   /**
+   * The line shown at the top of the modal when this bill has been adjusted
+   * before. This is the feature: without it, a second deduction against an
+   * already-deducted bill looks exactly like a first one, and the shop
+   * underpays a supplier with nothing to catch it.
+   */
+  function priorWarning(b) {
+    const s = STB.adjust.summary(b);
+    if (!s) return '';
+    const U = STB.util;
+    const when = String(s.at).slice(0, 10);
+    const move = s.delta === 0 ? '' :
+      ' (' + (s.delta < 0 ? '−' : '+') + U.money(Math.abs(s.delta)) + ')';
+    const why = s.reasons.length ? ' — ' + s.reasons[s.reasons.length - 1].text : '';
+    return 'Already adjusted ' + when + (s.by ? ' by ' + s.by : '') + ': ' +
+      U.money(s.original) + ' → ' + U.money(s.current) + move + why;
+  }
+
+  /**
    * True for a voucher built from invoices. Blank on every bill entered by hand
    * and on every row that predates the invoice feature, which is exactly the
    * distinction wanted — those keep the plain amount edit.
@@ -32,32 +50,50 @@
   function adjustVoucher(b) {
     const U = STB.util;
     const billed = Number(b.invoice_total);
-    const raw = prompt(
-      'Amount actually paid for ' + ((STB.partyById(b.party_id) || {}).name || '') +
-      '\nInvoices total ' + U.money(billed) + ' — enter what the bank debited:',
-      String(b.amount)
-    );
-    if (raw === null) return;
-    const v = U.safeEval(raw.trim());
-    if (Number.isNaN(v)) { STB.toast('Could not read that amount'); return; }
-    const amt = Math.round(v * 100) / 100;
-    if (!(amt > 0)) { STB.toast('Amount must be more than 0'); return; }
-    if (amt === Number(b.amount)) return;
+    STB.adjustModal.open({
+      title: 'Amount actually paid',
+      party: (STB.partyById(b.party_id) || {}).name || '',
+      warning: priorWarning(b),
+      hint: 'Invoices total ' + U.money(billed) + ' — enter what the bank debited.',
+      value: String(b.amount)
+    }).then((res) => {
+      if (!res) return;
+      const v = U.safeEval(res.raw);
+      if (Number.isNaN(v)) { STB.toast('Could not read that amount'); return; }
+      const amt = Math.round(v * 100) / 100;
+      if (!(amt > 0)) { STB.toast('Amount must be more than 0'); return; }
+      if (amt === Number(b.amount) && !res.reason) return;
 
-    const before = { amount: b.amount, adjustment: b.adjustment };
-    b.amount = amt;
-    b.adjustment = Math.round((billed - amt) * 100) / 100;
-    STB.toast(b.adjustment > 0
-      ? 'Paid ' + U.money(amt) + ' — ' + U.money(b.adjustment) + ' deducted ✓'
-      : 'Amount updated ✓');
-    STB.commitStore();
-
-    STB.db.adjustVoucherAmount(b.id, amt).catch((e) => {
-      console.error('adjustVoucherAmount failed', e);
-      const cur = STB.store.bills.find((x) => x.id === b.id);
-      if (cur) Object.assign(cur, before);
-      STB.toast('Could not update — ' + (e.message || 'reverted'));
+      const before = {
+        amount: b.amount, adjustment: b.adjustment,
+        original_amount: b.original_amount, adjusted_at: b.adjusted_at,
+        adjusted_by: b.adjusted_by, adjustment_reason: b.adjustment_reason
+      };
+      b.amount = amt;
+      b.adjustment = Math.round((billed - amt) * 100) / 100;
+      STB.toast(b.adjustment > 0
+        ? 'Paid ' + U.money(amt) + ' — ' + U.money(b.adjustment) + ' deducted ✓'
+        : 'Amount updated ✓');
       STB.commitStore();
+
+      STB.db.adjustVoucherAmount(b.id, amt, res.reason).then((r) => {
+        // The server owns the stamp — copy back what it wrote so the badge and
+        // the next warning show the real timestamp, not an optimistic guess.
+        const cur = STB.store.bills.find((x) => x.id === b.id);
+        if (cur && r) {
+          cur.original_amount = r.original_amount;
+          cur.adjusted_at = r.adjusted_at;
+          cur.adjusted_by = r.adjusted_by;
+          cur.adjustment_reason = r.adjustment_reason;
+          STB.commitStore();
+        }
+      }).catch((e) => {
+        console.error('adjustVoucherAmount failed', e);
+        const cur = STB.store.bills.find((x) => x.id === b.id);
+        if (cur) Object.assign(cur, before);
+        STB.toast('Could not update — ' + (e.message || 'reverted'));
+        STB.commitStore();
+      });
     });
   }
 
@@ -267,37 +303,53 @@
         // not touch. See adjustVoucher below.
         if (isVoucher(b)) { adjustVoucher(b); return; }
 
-        // Seed with the typed breakdown when there is one, so "1200+850" comes
-        // back editable as "1200+850" rather than as 2050.
-        const raw = prompt('Amount for ' + (STB.partyById(b.party_id) || {}).name +
-          ' — a number, or a sum like 1200+850:', b.amount_expr || String(b.amount));
-        if (raw === null) return;
-        const typed = raw.trim();
-        const v = STB.util.safeEval(typed);
-        if (Number.isNaN(v)) { STB.toast('Could not read that amount'); return; }
-        const amt = Math.round(v * 100) / 100;
-        if (!(amt > 0)) { STB.toast('Amount must be more than 0'); return; }
-        // Same rule as the entry form: keep the breakdown only when one was
-        // actually typed. Operator anywhere, or a minus past the first char.
-        const expr = /[+*/]|(?!^)-/.test(typed) ? typed : '';
-        if (amt === Number(b.amount) && expr === (b.amount_expr || '')) return;
+        STB.adjustModal.open({
+          title: 'Edit amount',
+          party: (STB.partyById(b.party_id) || {}).name || '',
+          warning: priorWarning(b),
+          value: b.amount_expr || String(b.amount)
+        }).then((res) => {
+          if (!res) return;
+          const typed = res.raw;
+          const v = STB.util.safeEval(typed);
+          if (Number.isNaN(v)) { STB.toast('Could not read that amount'); return; }
+          const amt = Math.round(v * 100) / 100;
+          if (!(amt > 0)) { STB.toast('Amount must be more than 0'); return; }
+          // Same rule as the entry form: keep the breakdown only when one was
+          // actually typed. Operator anywhere, or a minus past the first char.
+          const expr = /[+*/]|(?!^)-/.test(typed) ? typed : '';
+          if (amt === Number(b.amount) && expr === (b.amount_expr || '') && !res.reason) return;
 
-        const before = { amount: b.amount, amount_expr: b.amount_expr };
-        b.amount = amt;
-        b.amount_expr = expr;
-        STB.toast('Amount updated ✓');
-        STB.commitStore();
-
-        STB.db.updateBillAmount(id, amt, expr).catch((e) => {
-          console.error('updateBillAmount failed', e);
-          const cur = STB.store.bills.find((x) => x.id === id);
-          if (cur) Object.assign(cur, before);
-          // Surface the server's reason — "already marked paid" is a real
-          // outcome here (someone else settled it from another device), not a
-          // connection problem, and "check connection" would send Harshit
-          // looking in the wrong place.
-          STB.toast('Could not update — ' + (e.message || 'reverted'));
+          const before = {
+            amount: b.amount, amount_expr: b.amount_expr,
+            original_amount: b.original_amount, adjusted_at: b.adjusted_at,
+            adjusted_by: b.adjusted_by, adjustment_reason: b.adjustment_reason
+          };
+          b.amount = amt;
+          b.amount_expr = expr;
+          STB.toast('Amount updated ✓');
           STB.commitStore();
+
+          STB.db.updateBillAmount(id, amt, expr, res.reason).then((r) => {
+            const cur = STB.store.bills.find((x) => x.id === id);
+            if (cur && r) {
+              cur.original_amount = r.original_amount;
+              cur.adjusted_at = r.adjusted_at;
+              cur.adjusted_by = r.adjusted_by;
+              cur.adjustment_reason = r.adjustment_reason;
+              STB.commitStore();
+            }
+          }).catch((e) => {
+            console.error('updateBillAmount failed', e);
+            const cur = STB.store.bills.find((x) => x.id === id);
+            if (cur) Object.assign(cur, before);
+            // Surface the server's reason — "already marked paid" is a real
+            // outcome here (someone else settled it from another device), not a
+            // connection problem, and "check connection" would send Harshit
+            // looking in the wrong place.
+            STB.toast('Could not update — ' + (e.message || 'reverted'));
+            STB.commitStore();
+          });
         });
       }));
 
